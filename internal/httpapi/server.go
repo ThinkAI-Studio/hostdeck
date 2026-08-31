@@ -107,11 +107,16 @@ type Options struct {
 	Notifications          NotificationSender
 	NTFYNotifications      NotificationSender
 	WebhookNotifications   NotificationSender
+	TelegramNotifications  NotificationSender
+	DiscordNotifications   NotificationSender
 	NTFYURL                string
 	NTFYTopic              string
 	NTFYTokenSet           bool
 	WebhookURL             string
 	WebhookSecretSet       bool
+	TelegramChatID         string
+	TelegramBotTokenSet    bool
+	DiscordWebhookURL      string
 	DashboardConfig        *dashboardconfig.Service
 	DashboardConfigApplied func()
 	Preferences            PreferencesRepository
@@ -252,6 +257,10 @@ func (s *Server) routes() {
 		authenticatedAPI.POST("/notifications/ntfy/test", s.testNTFY)
 		authenticatedAPI.GET("/notifications/webhook", s.getWebhookStatus)
 		authenticatedAPI.POST("/notifications/webhook/test", s.testWebhook)
+		authenticatedAPI.GET("/notifications/telegram", s.getTelegramStatus)
+		authenticatedAPI.POST("/notifications/telegram/test", s.testTelegram)
+		authenticatedAPI.GET("/notifications/discord", s.getDiscordStatus)
+		authenticatedAPI.POST("/notifications/discord/test", s.testDiscord)
 	}
 	if s.options.DashboardConfig != nil {
 		authenticatedAPI.GET("/config/export", s.exportDashboardConfig)
@@ -380,6 +389,51 @@ func (s *Server) listServices(c *gin.Context) {
 	if err != nil {
 		writeError(c, http.StatusInternalServerError, "services_unavailable", "Unable to list services.", nil)
 		return
+	}
+	if s.options.Checks != nil {
+		if certs, certErr := s.options.Checks.ListCertificateObservations(c.Request.Context()); certErr == nil {
+			certMap := make(map[string]healthchecks.CertificateObservation, len(certs))
+			for _, cert := range certs {
+				certMap[cert.ServiceID] = cert
+			}
+			now := time.Now().UTC()
+			for i := range items {
+				if cert, ok := certMap[items[i].ID]; ok {
+					var days *int
+					level := "ok"
+					if cert.Error != "" {
+						level = "critical"
+					} else if !cert.NotAfter.IsZero() {
+						d := int(cert.NotAfter.Sub(now).Hours() / 24)
+						days = &d
+						switch {
+						case d < 7:
+							level = "critical"
+						case d < 30:
+							level = "warning"
+						}
+					}
+					var notAfter *time.Time
+					if !cert.NotAfter.IsZero() {
+						na := cert.NotAfter
+						notAfter = &na
+					}
+					var checkedAt *time.Time
+					if !cert.CheckedAt.IsZero() {
+						ca := cert.CheckedAt
+						checkedAt = &ca
+					}
+					items[i].TLSCert = &model.TLSCertInfo{
+						Issuer:    cert.Issuer,
+						NotAfter:  notAfter,
+						DaysLeft:  days,
+						Status:    level,
+						Error:     cert.Error,
+						CheckedAt: checkedAt,
+					}
+				}
+			}
+		}
 	}
 	c.JSON(http.StatusOK, items)
 }

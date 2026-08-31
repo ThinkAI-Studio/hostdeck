@@ -228,12 +228,12 @@ func TestProberCapsResponseBodyAtFourKiB(t *testing.T) {
 }
 
 func TestValidateProbeURLAcceptsTCPAndRejectsUnsafeForms(t *testing.T) {
-	for _, value := range []string{"tcp://redis:6379", "tcp://[fd7a:115c:a1e0::1]:5432"} {
+	for _, value := range []string{"tcp://redis:6379", "tcp://[fd7a:115c:a1e0::1]:5432", "udp://wireguard:51820"} {
 		if err := validateProbeURL(value); err != nil {
-			t.Fatalf("valid TCP probe %q rejected: %v", value, err)
+			t.Fatalf("valid probe %q rejected: %v", value, err)
 		}
 	}
-	for _, value := range []string{"tcp://redis", "tcp://redis:0", "tcp://redis:65536", "tcp://user:pass@redis:6379", "tcp://redis:6379/health", "tcp://redis:6379?query=1", "udp://redis:6379"} {
+	for _, value := range []string{"tcp://redis", "tcp://redis:0", "tcp://redis:65536", "tcp://user:pass@redis:6379", "tcp://redis:6379/health", "tcp://redis:6379?query=1", "ftp://redis:6379", "ssh://redis:22"} {
 		if err := validateProbeURL(value); err == nil {
 			t.Fatalf("unsafe or invalid TCP probe %q accepted", value)
 		}

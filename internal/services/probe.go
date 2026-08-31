@@ -116,6 +116,9 @@ func (p *Prober) Probe(ctx context.Context, rawURL string) ProbeResult {
 		_ = connection.Close()
 		return ProbeResult{Status: model.ServiceStatusUp, LatencyMS: latency}
 	}
+	if strings.EqualFold(parsed.Scheme, "udp") {
+		return p.probeUDP(ctx, parsed, started)
+	}
 	if strings.EqualFold(parsed.Scheme, "dns") {
 		return p.probeDNS(ctx, parsed, started)
 	}
@@ -366,3 +369,63 @@ func validateDNSURL(parsed *url.URL) error {
 	}
 	return nil
 }
+
+func (p *Prober) probeUDP(ctx context.Context, parsed *url.URL, started time.Time) ProbeResult {
+	if err := validateUDPURL(parsed.String()); err != nil || p == nil || p.dialContext == nil {
+		return ProbeResult{Status: model.ServiceStatusDown}
+	}
+	connection, err := p.dialContext(ctx, "udp", parsed.Host)
+	latency := time.Since(started).Milliseconds()
+	if err != nil {
+		return ProbeResult{Status: model.ServiceStatusDown, LatencyMS: latency}
+	}
+	defer connection.Close()
+
+	deadline := time.Now().Add(1500 * time.Millisecond)
+	_ = connection.SetDeadline(deadline)
+
+	if _, err := connection.Write([]byte{0x00}); err != nil {
+		return ProbeResult{Status: model.ServiceStatusDown, LatencyMS: latency}
+	}
+
+	buffer := make([]byte, 256)
+	_, readErr := connection.Read(buffer)
+	latency = time.Since(started).Milliseconds()
+	if readErr == nil {
+		return ProbeResult{Status: model.ServiceStatusUp, LatencyMS: latency}
+	}
+
+	var netErr net.Error
+	if errors.As(readErr, &netErr) && netErr.Timeout() {
+		return ProbeResult{Status: model.ServiceStatusUp, LatencyMS: latency}
+	}
+
+	msg := strings.ToLower(readErr.Error())
+	if strings.Contains(msg, "refused") || strings.Contains(msg, "reset") || strings.Contains(msg, "unreachable") {
+		return ProbeResult{Status: model.ServiceStatusDown, LatencyMS: latency}
+	}
+
+	return ProbeResult{Status: model.ServiceStatusUp, LatencyMS: latency}
+}
+
+func validateUDPURL(value string) error {
+	if len(value) > 2048 {
+		return fmt.Errorf("must not exceed 2048 bytes")
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || !strings.EqualFold(parsed.Scheme, "udp") || parsed.Hostname() == "" || parsed.Port() == "" || parsed.User != nil {
+		return fmt.Errorf("must be an absolute UDP endpoint in the form udp://host:port")
+	}
+	if parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.Opaque != "" {
+		return fmt.Errorf("UDP probe must not contain a path, query, or fragment")
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil || port < 1 || port > 65535 {
+		return fmt.Errorf("UDP probe port must be between 1 and 65535")
+	}
+	if _, _, err := net.SplitHostPort(parsed.Host); err != nil {
+		return fmt.Errorf("UDP probe must include a valid host and port")
+	}
+	return nil
+}
+

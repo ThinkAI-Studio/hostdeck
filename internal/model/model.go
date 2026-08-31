@@ -36,6 +36,16 @@ type Service struct {
 	UpdatedAt           time.Time     `json:"updatedAt"`
 	Category            string        `json:"category,omitempty"`
 	Tags                []string      `json:"tags,omitempty"`
+	TLSCert             *TLSCertInfo  `json:"tlsCert,omitempty"`
+}
+
+type TLSCertInfo struct {
+	Issuer    string     `json:"issuer,omitempty"`
+	NotAfter  *time.Time `json:"notAfter,omitempty"`
+	DaysLeft  *int       `json:"daysLeft,omitempty"`
+	Status    string     `json:"status,omitempty"` // "ok", "warning", "critical", "error"
+	Error     string     `json:"error,omitempty"`
+	CheckedAt *time.Time `json:"checkedAt,omitempty"`
 }
 
 type LaunchpadBookmark struct {

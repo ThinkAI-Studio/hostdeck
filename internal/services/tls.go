@@ -28,7 +28,8 @@ type TLSInspection struct {
 }
 
 type TLSInspector struct {
-	client *http.Client
+	client      *http.Client
+	dialContext func(context.Context, string, string) (net.Conn, error)
 }
 
 func NewTLSInspector(policy ProbePolicy) (*TLSInspector, error) {
@@ -37,12 +38,15 @@ func NewTLSInspector(policy ProbePolicy) (*TLSInspector, error) {
 		return nil, err
 	}
 	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-	return &TLSInspector{client: &http.Client{
-		Transport: transport,
-		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
-			return http.ErrUseLastResponse
+	return &TLSInspector{
+		client: &http.Client{
+			Transport: transport,
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
 		},
-	}}, nil
+		dialContext: transport.DialContext,
+	}, nil
 }
 
 func (i *TLSInspector) Inspect(ctx context.Context, rawURL string) TLSInspection {
@@ -52,8 +56,42 @@ func (i *TLSInspector) Inspect(ctx context.Context, rawURL string) TLSInspection
 		return result
 	}
 	parsed, err := url.Parse(rawURL)
-	if err != nil || !strings.EqualFold(parsed.Scheme, "https") || parsed.Hostname() == "" || parsed.User != nil {
-		result.Error = "configured URL is not a valid HTTPS endpoint"
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil {
+		result.Error = "configured URL is not a valid endpoint"
+		return result
+	}
+	if strings.EqualFold(parsed.Scheme, "tls") {
+		if i.dialContext == nil {
+			result.Error = "TLS inspector dialer is unavailable"
+			return result
+		}
+		host := parsed.Host
+		if parsed.Port() == "" {
+			host = net.JoinHostPort(parsed.Hostname(), "443")
+		}
+		conn, err := i.dialContext(ctx, "tcp", host)
+		if err != nil {
+			result.Error = sanitizeTLSError(err)
+			return result
+		}
+		defer conn.Close()
+		tlsConn := tls.Client(conn, &tls.Config{ServerName: parsed.Hostname(), MinVersion: tls.VersionTLS12})
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			result.Error = sanitizeTLSError(err)
+			return result
+		}
+		state := tlsConn.ConnectionState()
+		if len(state.PeerCertificates) == 0 {
+			result.Error = "endpoint did not present a TLS certificate"
+			return result
+		}
+		certificate := state.PeerCertificates[0]
+		result.NotAfter = certificate.NotAfter.UTC()
+		result.Issuer = certificate.Issuer.String()
+		return result
+	}
+	if !strings.EqualFold(parsed.Scheme, "https") {
+		result.Error = "configured URL is not a valid HTTPS or TLS endpoint"
 		return result
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodHead, parsed.String(), nil)
@@ -144,7 +182,7 @@ func (s *TLSScanner) ScanOnce(ctx context.Context) error {
 	var failures []error
 	for _, service := range items {
 		endpoint := strings.TrimSpace(service.DisplayURL)
-		if !isHTTPSURL(endpoint) || strings.TrimSpace(service.ID) == "" {
+		if !isTLSEndpoint(endpoint) || strings.TrimSpace(service.ID) == "" {
 			continue
 		}
 		checkContext, cancel := context.WithTimeout(ctx, s.timeout)
@@ -162,6 +200,11 @@ func (s *TLSScanner) ScanOnce(ctx context.Context) error {
 		failures = append(failures, fmt.Errorf("reconcile certificate observations: %w", err))
 	}
 	return errors.Join(failures...)
+}
+
+func isTLSEndpoint(raw string) bool {
+	parsed, err := url.Parse(raw)
+	return err == nil && (strings.EqualFold(parsed.Scheme, "https") || strings.EqualFold(parsed.Scheme, "tls")) && parsed.Hostname() != "" && parsed.User == nil
 }
 
 func isHTTPSURL(raw string) bool {

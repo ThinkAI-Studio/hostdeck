@@ -19,6 +19,7 @@ function normalizedService(service = {}, index = 0) {
     status: String(service.status || service.health?.status || "unknown").toLowerCase(),
     lastCheckedAt: service.lastCheckedAt || service.lastCheck || null,
     latencyMs: Number(service.latencyMs ?? service.latency ?? NaN),
+    tlsCert: service.tlsCert || null,
   };
 }
 
@@ -59,6 +60,12 @@ function safeProbeUrl(value) {
   try {
     const url = new URL(String(value));
     if (url.protocol === "tcp:") {
+      const port = Number(url.port);
+      if (!url.hostname || !url.port || !Number.isInteger(port) || port < 1 || port > 65535) return null;
+      if (url.username || url.password || url.pathname !== "" || url.search || url.hash) return null;
+      return url;
+    }
+    if (url.protocol === "udp:") {
       const port = Number(url.port);
       if (!url.hostname || !url.port || !Number.isInteger(port) || port < 1 || port > 65535) return null;
       if (url.username || url.password || url.pathname !== "" || url.search || url.hash) return null;
@@ -116,16 +123,17 @@ export function createServicesController({ api, toast, onChanged }) {
       displayValue = `http://${window.location.hostname}:${port}`;
     }
     const displayUrl = safeHttpUrl(displayValue);
-    const probeType = ["none", "http", "tcp", "dns"].includes(payload.probeType) ? payload.probeType : "none";
+    const probeType = ["none", "http", "tcp", "udp", "dns"].includes(payload.probeType) ? payload.probeType : "none";
     const rawProbeUrl = probeType === "none" ? "" : payload.probeUrl.trim();
     const probeUrl = rawProbeUrl ? safeProbeUrl(rawProbeUrl) : null;
     if (!payload.name.trim()) throw new Error("Service name is required.");
     const category = payload.category.trim() || "Uncategorized";
     if (category.length > 40) throw new Error("Category must be 40 characters or fewer.");
     if (!displayUrl) throw new Error("Display URL must be an absolute HTTP or HTTPS URL without credentials.");
-    if (rawProbeUrl && !probeUrl) throw new Error("Probe endpoint must be HTTP/HTTPS, tcp://host:port, or dns://host/domain without credentials.");
+    if (rawProbeUrl && !probeUrl) throw new Error("Probe endpoint must be HTTP/HTTPS, tcp://host:port, udp://host:port, or dns://host/domain without credentials.");
     if (probeType === "http" && probeUrl && !["http:", "https:"].includes(probeUrl.protocol)) throw new Error("HTTP probe type requires an HTTP or HTTPS URL.");
     if (probeType === "tcp" && probeUrl?.protocol !== "tcp:") throw new Error("TCP probe type requires tcp://host:port.");
+    if (probeType === "udp" && probeUrl?.protocol !== "udp:") throw new Error("UDP probe type requires udp://host:port.");
     if (probeType === "dns" && probeUrl?.protocol !== "dns:") throw new Error("DNS probe type requires dns://server/domain.");
     return {
       name: payload.name.trim(),
@@ -162,7 +170,11 @@ export function createServicesController({ api, toast, onChanged }) {
     const name = document.createElement("span");
     name.className = "service-name";
     link.append(name);
-    heading.append(link);
+
+    const tlsBadge = document.createElement("span");
+    tlsBadge.className = "service-tls-badge mono";
+    tlsBadge.hidden = true;
+    heading.append(link, tlsBadge);
 
     const endpoint = document.createElement("span");
     endpoint.className = "service-endpoint mono";
@@ -197,7 +209,7 @@ export function createServicesController({ api, toast, onChanged }) {
     checked.dataset.label = "Checked";
 
     article.append(heading, endpoint, status, latency, checked, trigger);
-    article.refs = { link, name, endpoint, trigger, status, statusText, latency, checked };
+    article.refs = { link, name, tlsBadge, endpoint, trigger, status, statusText, latency, checked };
     article.addEventListener("contextmenu", (event) => {
       if (!admin) return;
       event.preventDefault();
@@ -209,7 +221,7 @@ export function createServicesController({ api, toast, onChanged }) {
   function updateCard(article, service) {
     article.service = service;
     article.dataset.serviceId = service.id;
-    const { link, name, endpoint, trigger, status, statusText, latency, checked } = article.refs;
+    const { link, name, tlsBadge, endpoint, trigger, status, statusText, latency, checked } = article.refs;
     name.textContent = service.name;
     name.title = service.name;
     endpoint.textContent = displayEndpoint(service.displayUrl);
@@ -235,19 +247,49 @@ export function createServicesController({ api, toast, onChanged }) {
     checked.textContent = service.lastCheckedAt ? timeAgo(service.lastCheckedAt) : "";
     if (service.lastCheckedAt) checked.setAttribute("aria-label", `Last checked ${timeAgo(service.lastCheckedAt)}`);
     else checked.removeAttribute("aria-label");
+
+    if (service.tlsCert) {
+      const cert = service.tlsCert;
+      tlsBadge.hidden = false;
+      const statusLevel = cert.status || "ok";
+      tlsBadge.dataset.tlsStatus = statusLevel;
+      if (cert.status === "error" || cert.error) {
+        tlsBadge.textContent = "TLS ERR";
+        tlsBadge.title = cert.error || "TLS certificate error";
+      } else if (typeof cert.daysLeft === "number") {
+        if (cert.daysLeft < 0) {
+          tlsBadge.textContent = "TLS EXP";
+          tlsBadge.title = `Expired on ${cert.notAfter ? new Date(cert.notAfter).toLocaleDateString() : 'unknown'}`;
+        } else {
+          tlsBadge.textContent = `TLS ${cert.daysLeft}d`;
+          tlsBadge.title = `Expires: ${cert.notAfter ? new Date(cert.notAfter).toLocaleDateString() : 'unknown'}${cert.issuer ? ` (${cert.issuer})` : ''}`;
+        }
+      } else {
+        tlsBadge.textContent = "TLS OK";
+        tlsBadge.title = cert.issuer ? `Issuer: ${cert.issuer}` : "TLS active";
+      }
+    } else {
+      tlsBadge.hidden = true;
+      tlsBadge.textContent = "";
+    }
   }
 
   function summary() {
     const up = services.filter((service) => UP_STATES.has(service.status)).length;
-    const down = services.filter((service) => DOWN_STATES.has(service.status) || ["degraded", "warning"].includes(service.status)).length;
-    return { total: services.length, up, down, unknown: Math.max(0, services.length - up - down) };
+    const down = services.filter((service) => DOWN_STATES.has(service.status) || ["degraded", "warning"].includes(service.status));
+    const total = services.length;
+    return { total, up, down: down.length, unknown: Math.max(0, total - up - down.length) };
   }
 
   function matchesFilter(service) {
     const haystack = [service.name, service.displayUrl, service.probeUrl, service.status].join(" ").toLowerCase();
     if (filterText && !haystack.includes(filterText)) return false;
     if (filter === "up") return UP_STATES.has(service.status);
-    if (filter === "attention") return DOWN_STATES.has(service.status) || ["degraded", "warning"].includes(service.status);
+    if (filter === "attention") {
+      const isProblem = DOWN_STATES.has(service.status) || ["degraded", "warning"].includes(service.status);
+      const isTlsProblem = Boolean(service.tlsCert && (service.tlsCert.status === "critical" || service.tlsCert.status === "warning" || service.tlsCert.status === "error" || (typeof service.tlsCert.daysLeft === "number" && service.tlsCert.daysLeft <= 30)));
+      return isProblem || isTlsProblem;
+    }
     if (filter === "unknown") return !UP_STATES.has(service.status) && !DOWN_STATES.has(service.status) && !["degraded", "warning"].includes(service.status);
     return true;
   }

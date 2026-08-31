@@ -223,6 +223,9 @@ func validateProbeURL(value string) error {
 		if strings.EqualFold(parsed.Scheme, "tcp") {
 			return validateTCPURL(value)
 		}
+		if strings.EqualFold(parsed.Scheme, "udp") {
+			return validateUDPURL(value)
+		}
 		if strings.EqualFold(parsed.Scheme, "dns") {
 			return validateDNSURL(parsed)
 		}
