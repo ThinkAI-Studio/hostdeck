@@ -5,6 +5,7 @@ import { DemoApi, startDemoFeed } from "./demo.js";
 import { bytes, clamp, number, percent, rate, setProgress, setText, timeAgo, uptime } from "./format.js";
 import { createHistoryController } from "./history.js";
 import { initHelp } from "./help.js";
+import { initTour } from "./tour.js";
 import { createLogsController } from "./logs.js";
 import { createMetricCharts } from "./metrics.js";
 import { createNodesController } from "./nodes.js";
@@ -16,7 +17,31 @@ import { MetricsStream } from "./socket.js";
 import { createTerminalController } from "./terminal.js";
 import { OVERVIEW_WIDGET_DEFAULT_HIDDEN, OVERVIEW_WIDGET_DEFAULT_SIZES, OVERVIEW_WIDGET_ORDER, normalizeOverviewPreferences } from "./widget-catalog.js";
 
-const demo = new URLSearchParams(window.location.search).get("demo") === "1";
+const urlParams = new URLSearchParams(window.location.search);
+const demo = urlParams.get("demo") === "1";
+const isStatusMode = urlParams.get("mode") === "status" || window.location.pathname.endsWith("/status");
+if (isStatusMode) {
+  document.body.dataset.mode = "status";
+}
+const isRackMode = !isStatusMode && (urlParams.get("mode") === "rack" || urlParams.get("kiosk") === "1" || urlParams.get("kiosk") === "rack2u");
+if (isRackMode) {
+  document.body.dataset.mode = "rack";
+}
+const rackMediaQuery = typeof window.matchMedia === "function" ? window.matchMedia("(max-height: 520px) and (min-width: 1200px)") : null;
+function syncRackMedia() {
+  if (isRackMode || !rackMediaQuery) return;
+  if (rackMediaQuery.matches) {
+    document.body.dataset.rackMedia = "true";
+  } else {
+    delete document.body.dataset.rackMedia;
+  }
+}
+if (rackMediaQuery) {
+  syncRackMedia();
+  if (typeof rackMediaQuery.addEventListener === "function") {
+    rackMediaQuery.addEventListener("change", syncRackMedia);
+  }
+}
 const api = demo ? new DemoApi() : new DashboardApi();
 const charts = createMetricCharts();
 let stream = null;
@@ -77,19 +102,75 @@ const elements = Object.fromEntries([
 
 function toast(message, level = "info") {
   const region = document.getElementById("toast-region");
+  if (!region) return;
+
+  const icons = {
+    error: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
+    success: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="9 11 12 14 22 4"/></svg>`,
+    warning: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
+    info: `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`,
+  };
+
   const item = document.createElement("div");
   item.className = "toast";
   item.dataset.level = level;
+  item.setAttribute("role", level === "error" ? "alert" : "status");
+
+  const icon = document.createElement("span");
+  icon.className = "toast-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.innerHTML = icons[level] || icons.info;
+
   const content = document.createElement("span");
   content.className = "toast-message";
   content.textContent = String(message);
-  const progress = document.createElement("span");
-  progress.className = "toast-progress";
-  progress.setAttribute("aria-hidden", "true");
-  item.append(content, progress);
+
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.className = "toast-dismiss";
+  dismiss.setAttribute("aria-label", "Dismiss notification");
+  dismiss.setAttribute("title", "Dismiss");
+  dismiss.textContent = "×";
+
+  item.append(icon, content, dismiss);
   region.append(item);
-  window.setTimeout(() => item.remove(), 3000);
+
+  let timer = null;
+  const dismissToast = () => {
+    if (item.classList.contains("is-leaving")) return;
+    item.classList.add("is-leaving");
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    setTimeout(() => {
+      item.remove();
+    }, 220);
+  };
+
+  dismiss.onclick = (e) => {
+    e.stopPropagation();
+    dismissToast();
+  };
+
+  timer = setTimeout(dismissToast, 3500);
+
+  item.onmouseenter = () => {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+
+  item.onmouseleave = () => {
+    if (!timer && !item.classList.contains("is-leaving")) {
+      timer = setTimeout(dismissToast, 2000);
+    }
+  };
 }
+
+window.toast = toast;
+window.addEventListener("homelab:toast", (e) => toast(e.detail?.message, e.detail?.level));
 
 function setStateText(element, value) { setText(element, value, true); }
 function setMetricText(element, value) { setText(element, value, false); }
@@ -1119,11 +1200,12 @@ function applySession(session = {}) {
   sessionHostShellCapability = session.capabilities?.hostShell === true;
   document.body.classList.toggle("viewer", !admin);
   document.body.classList.toggle("admin", admin);
+  const providerBadge = identity.provider ? identity.provider.toUpperCase() : (admin ? "ADMIN" : "VIEWER");
   setMetricText(elements["session-user"], authenticated ? login : "unauthenticated");
-  setMetricText(elements["session-role"], authenticated ? (admin ? "ADMIN" : "VIEWER") : "SIGN IN");
+  setMetricText(elements["session-role"], authenticated ? (admin ? "ADMIN" : providerBadge) : "SIGN IN");
   const identityGroup = document.getElementById("session-identity");
   identityGroup.setAttribute("aria-label", authenticated ? `Signed in as ${login}, role ${admin ? "administrator" : "viewer"}` : "Not signed in; sign in to save dashboard preferences");
-  identityGroup.title = authenticated ? `${login} · ${admin ? "ADMIN" : "VIEWER"}` : "Not signed in";
+  identityGroup.title = authenticated ? `${login} · ${admin ? "ADMIN" : providerBadge}` : "Not signed in";
   servicesController.setAdmin(admin);
   containersController.setAdmin(admin);
   alertsController.setAdmin(admin);
@@ -1248,6 +1330,7 @@ for (const id of ["terminal-size-compact", "terminal-size-default"]) {
 }
 const sessionKeepalive = window.setInterval(() => scheduleSessionRenewal(0), 5 * 60_000);
 initHelp();
+initTour();
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("./sw.js", { scope: "./" }).catch((error) => {

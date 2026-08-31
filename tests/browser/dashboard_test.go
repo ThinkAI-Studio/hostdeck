@@ -354,12 +354,12 @@ func TestDemoWorkspaceNavigationAndPersistence(t *testing.T) {
 	err = chromedp.Run(ctx,
 		chromedp.Click(`[data-workspace="services"]`, chromedp.ByQuery),
 		chromedp.Click(`[data-service-filter="unknown"]`, chromedp.ByQuery),
-		chromedp.Poll(`document.querySelector('#services-filter-count')?.textContent === '1 / 4 SHOWN'`, nil, chromedp.WithPollingTimeout(2*time.Second)),
+		chromedp.Poll(`document.querySelector('#services-filter-count')?.textContent === '1 / 5 SHOWN'`, nil, chromedp.WithPollingTimeout(2*time.Second)),
 		chromedp.Click(`[data-service-filter="all"]`, chromedp.ByQuery),
 		chromedp.Evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: '/', bubbles: true }))`, nil),
 		chromedp.Poll(`document.activeElement === document.querySelector('#services-filter-input')`, nil, chromedp.WithPollingTimeout(2*time.Second)),
 		chromedp.Evaluate(`(() => { const input = document.querySelector('#services-filter-input'); input.value = 'immich'; input.dispatchEvent(new Event('input', { bubbles: true })); })()`, nil),
-		chromedp.Poll(`document.querySelector('#services-filter-count')?.textContent === '1 / 4 SHOWN'`, nil, chromedp.WithPollingTimeout(2*time.Second)),
+		chromedp.Poll(`document.querySelector('#services-filter-count')?.textContent === '1 / 5 SHOWN'`, nil, chromedp.WithPollingTimeout(2*time.Second)),
 		chromedp.Evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'g', bubbles: true }))`, nil),
 		chromedp.Evaluate(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }))`, nil),
 		chromedp.Poll(`!document.querySelector('#workspace-containers').hidden`, nil, chromedp.WithPollingTimeout(2*time.Second)),
@@ -450,7 +450,7 @@ func TestDemoContextRoutesRestoreFiltersAndHistory(t *testing.T) {
 		chromedp.Poll(`(() => !document.querySelector('#workspace-services').hidden
           && document.querySelector('#services-filter-input').value === 'Hermes'
           && document.querySelector('[data-service-filter="unknown"]').getAttribute('aria-pressed') === 'true'
-          && document.querySelector('#services-filter-count').textContent === '1 / 4 SHOWN')()`, nil, chromedp.WithPollingTimeout(3*time.Second)),
+          && document.querySelector('#services-filter-count').textContent === '1 / 5 SHOWN')()`, nil, chromedp.WithPollingTimeout(3*time.Second)),
 		chromedp.Click(`[data-workspace="overview"]`, chromedp.ByQuery),
 		chromedp.Poll(`location.hash === '#overview' && !document.querySelector('#workspace-overview').hidden`, nil, chromedp.WithPollingTimeout(2*time.Second)),
 		chromedp.Click("#overview-containers-kpi", chromedp.ByQuery),
@@ -1167,7 +1167,7 @@ func TestDemoDashboardInteractionsAndEdgeStates(t *testing.T) {
 	if !report.PartialBadgeVisible || report.OverviewHealth != "PARTIAL" {
 		t.Fatalf("truncated snapshot was presented as complete: %+v", report)
 	}
-	if report.Services != 5 || !strings.HasSuffix(report.AddedEndpoint, ":9090") {
+	if report.Services != 6 || !strings.HasSuffix(report.AddedEndpoint, ":9090") {
 		t.Fatalf("port-only quick add failed: %+v", report)
 	}
 	if !report.DialogInitialFocus || !report.DialogRestoredFocus {
@@ -2159,3 +2159,581 @@ func TestDemoHelpDialogContextSync(t *testing.T) {
 		t.Fatalf("help dialog did not close on Escape/cancel")
 	}
 }
+
+func TestDemoInteractiveButtonTour(t *testing.T) {
+	chrome := chromePath(t)
+	assets, err := homelab.Static()
+	if err != nil {
+		t.Fatal(err)
+	}
+	static, err := httpapi.NewStaticHandler(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(static)
+	defer server.Close()
+
+	allocatorOptions := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath(chrome), chromedp.Flag("no-sandbox", true), chromedp.Flag("disable-gpu", true))
+	allocator, cancelAllocator := chromedp.NewExecAllocator(context.Background(), allocatorOptions...)
+	defer cancelAllocator()
+	ctx, cancel := newBrowserContext(allocator)
+	defer cancel()
+	ctx, timeout := context.WithTimeout(ctx, 20*time.Second)
+	defer timeout()
+
+	var tourReport struct {
+		PopoverVisible   bool   `json:"popoverVisible"`
+		BackdropVisible  bool   `json:"backdropVisible"`
+		HighlightVisible bool   `json:"highlightVisible"`
+		StepBadge        string `json:"stepBadge"`
+		Title            string `json:"title"`
+	}
+
+	err = chromedp.Run(ctx,
+		chromedp.EmulateViewport(1440, 900),
+		chromedp.Navigate(server.URL+"/?demo=1"),
+		chromedp.WaitVisible("#dashboard", chromedp.ByQuery),
+		chromedp.WaitVisible("#help-open", chromedp.ByQuery),
+		chromedp.Click("#help-open", chromedp.ByQuery),
+		chromedp.WaitVisible("#tour-start-btn", chromedp.ByQuery),
+		chromedp.Click("#tour-start-btn", chromedp.ByQuery),
+		chromedp.WaitVisible("#tour-popover:not([hidden])", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => ({
+			popoverVisible: !document.getElementById('tour-popover').hidden,
+			backdropVisible: !document.getElementById('tour-backdrop').hidden,
+			highlightVisible: !document.getElementById('tour-highlight').hidden,
+			stepBadge: document.getElementById('tour-step-badge').textContent.trim(),
+			title: document.getElementById('tour-title').textContent.trim()
+		}))()`, &tourReport),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tourReport.PopoverVisible || !tourReport.BackdropVisible || !tourReport.HighlightVisible || tourReport.StepBadge != "STEP 1 OF 8" {
+		t.Fatalf("tour did not start correctly: %+v", tourReport)
+	}
+
+	// Advance to next step
+	err = chromedp.Run(ctx,
+		chromedp.Click("#tour-next-btn", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => ({
+			stepBadge: document.getElementById('tour-step-badge').textContent.trim(),
+			title: document.getElementById('tour-title').textContent.trim()
+		}))()`, &tourReport),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tourReport.StepBadge != "STEP 2 OF 8" {
+		t.Fatalf("tour next button did not advance step: %+v", tourReport)
+	}
+
+	// Test Escape closes tour
+	var closed bool
+	err = chromedp.Run(ctx,
+		chromedp.KeyEvent(kb.Escape),
+		chromedp.Evaluate(`(() => document.getElementById('tour-popover').hidden && document.getElementById('tour-backdrop').hidden)()`, &closed),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !closed {
+		t.Fatalf("tour did not close on Escape key")
+	}
+}
+
+
+
+func TestDemoTopCenterToastNotification(t *testing.T) {
+	chrome := chromePath(t)
+	assets, err := homelab.Static()
+	if err != nil {
+		t.Fatal(err)
+	}
+	static, err := httpapi.NewStaticHandler(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(static)
+	defer server.Close()
+
+	allocatorOptions := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath(chrome), chromedp.Flag("no-sandbox", true), chromedp.Flag("disable-gpu", true))
+	allocator, cancelAllocator := chromedp.NewExecAllocator(context.Background(), allocatorOptions...)
+	defer cancelAllocator()
+	ctx, cancel := newBrowserContext(allocator)
+	defer cancel()
+	ctx, timeout := context.WithTimeout(ctx, 20*time.Second)
+	defer timeout()
+
+	var toastReport struct {
+		HasRegion   bool   `json:"hasRegion"`
+		ActiveLevel string `json:"activeLevel"`
+		Message     string `json:"message"`
+		ToastCount  int    `json:"toastCount"`
+		Dismissed   int    `json:"dismissed"`
+	}
+
+	err = chromedp.Run(ctx,
+		chromedp.EmulateViewport(1440, 900),
+		chromedp.Navigate(server.URL+"/?demo=1"),
+		chromedp.WaitVisible("#dashboard", chromedp.ByQuery),
+		chromedp.Evaluate(`!!document.getElementById('toast-region')`, &toastReport.HasRegion),
+		// Trigger toast notification
+		chromedp.Evaluate(`(() => {
+			window.toast('Container restarted successfully', 'success');
+			const toast = document.querySelector('#toast-region .toast');
+			return {
+				activeLevel: toast?.dataset.level || '',
+				message: toast?.querySelector('.toast-message')?.textContent || '',
+				toastCount: document.querySelectorAll('#toast-region .toast').length
+			};
+		})()`, &toastReport),
+		chromedp.Sleep(100 * time.Millisecond),
+		chromedp.Click("#toast-region .toast .toast-dismiss", chromedp.ByQuery),
+		chromedp.Poll(`document.querySelectorAll('#toast-region .toast').length === 0`, nil, chromedp.WithPollingTimeout(2*time.Second)),
+		chromedp.Evaluate(`document.querySelectorAll('#toast-region .toast').length`, &toastReport.Dismissed),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !toastReport.HasRegion {
+		t.Fatalf("toast region should exist: %+v", toastReport)
+	}
+	if toastReport.ActiveLevel != "success" || toastReport.Message != "Container restarted successfully" || toastReport.ToastCount != 1 {
+		t.Fatalf("toast did not activate correctly: %+v", toastReport)
+	}
+	if toastReport.Dismissed != 0 {
+		t.Fatalf("toast dismiss did not clear toast: %+v", toastReport)
+	}
+}
+
+func TestDemo2URackmountKioskMode(t *testing.T) {
+	chrome := chromePath(t)
+	assets, err := homelab.Static()
+	if err != nil {
+		t.Fatal(err)
+	}
+	static, err := httpapi.NewStaticHandler(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(static)
+	defer server.Close()
+
+	allocatorOptions := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath(chrome), chromedp.Flag("no-sandbox", true), chromedp.Flag("disable-gpu", true))
+	allocator, cancelAllocator := chromedp.NewExecAllocator(context.Background(), allocatorOptions...)
+	defer cancelAllocator()
+	ctx, cancel := newBrowserContext(allocator)
+	defer cancel()
+	ctx, timeout := context.WithTimeout(ctx, 20*time.Second)
+	defer timeout()
+
+	var rackReport struct {
+		HeaderHeight float64 `json:"headerHeight"`
+		SidebarWidth float64 `json:"sidebarWidth"`
+		ModeAttr     string  `json:"modeAttr"`
+	}
+
+	// 1. Test via query param ?mode=rack
+	err = chromedp.Run(ctx,
+		chromedp.EmulateViewport(1920, 480),
+		chromedp.Navigate(server.URL+"/?demo=1&mode=rack"),
+		chromedp.WaitVisible("#dashboard", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const header = document.querySelector('.app-header');
+			const sidebar = document.querySelector('.workspace-sidebar');
+			return {
+				headerHeight: header ? header.getBoundingClientRect().height : 0,
+				sidebarWidth: sidebar ? sidebar.getBoundingClientRect().width : 0,
+				modeAttr: document.body.dataset.mode || ''
+			};
+		})()`, &rackReport),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rackReport.ModeAttr != "rack" {
+		t.Fatalf("expected body[data-mode='rack'], got %q", rackReport.ModeAttr)
+	}
+	if rackReport.HeaderHeight > 40 {
+		t.Fatalf("header height should be compact <= 40px in 2U rack mode, got %f", rackReport.HeaderHeight)
+	}
+	if rackReport.SidebarWidth > 50 {
+		t.Fatalf("sidebar width should be compact <= 50px rail in 2U rack mode, got %f", rackReport.SidebarWidth)
+	}
+
+	// 2. Test via 1280x400 media query without explicit ?mode=rack
+	var mediaReport struct {
+		HeaderHeight float64 `json:"headerHeight"`
+		SidebarWidth float64 `json:"sidebarWidth"`
+	}
+	err = chromedp.Run(ctx,
+		chromedp.EmulateViewport(1280, 400),
+		chromedp.Navigate(server.URL+"/?demo=1"),
+		chromedp.WaitVisible("#dashboard", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const header = document.querySelector('.app-header');
+			const sidebar = document.querySelector('.workspace-sidebar');
+			return {
+				headerHeight: header ? header.getBoundingClientRect().height : 0,
+				sidebarWidth: sidebar ? sidebar.getBoundingClientRect().width : 0
+			};
+		})()`, &mediaReport),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mediaReport.HeaderHeight > 40 {
+		t.Fatalf("media query header height should be <= 40px, got %f", mediaReport.HeaderHeight)
+	}
+	if mediaReport.SidebarWidth > 50 {
+		t.Fatalf("media query sidebar width should be <= 50px, got %f", mediaReport.SidebarWidth)
+	}
+}
+
+func TestDemoTelegramDiscordAlertDelivery(t *testing.T) {
+	chrome := chromePath(t)
+	assets, err := homelab.Static()
+	if err != nil {
+		t.Fatal(err)
+	}
+	static, err := httpapi.NewStaticHandler(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(static)
+	defer server.Close()
+
+	allocatorOptions := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath(chrome), chromedp.Flag("no-sandbox", true), chromedp.Flag("disable-gpu", true))
+	allocator, cancelAllocator := chromedp.NewExecAllocator(context.Background(), allocatorOptions...)
+	defer cancelAllocator()
+	ctx, cancel := newBrowserContext(allocator)
+	defer cancel()
+	ctx, timeout := context.WithTimeout(ctx, 20*time.Second)
+	defer timeout()
+
+	var alertDeliveryReport struct {
+		TelegramConfigured string `json:"telegramConfigured"`
+		TelegramText       string `json:"telegramText"`
+		DiscordConfigured  string `json:"discordConfigured"`
+		DiscordText        string `json:"discordText"`
+		ToastMessage       string `json:"toastMessage"`
+	}
+
+	err = chromedp.Run(ctx,
+		chromedp.EmulateViewport(1440, 900),
+		chromedp.Navigate(server.URL+"/?demo=1"),
+		chromedp.WaitVisible("#alerts-jump", chromedp.ByQuery),
+		chromedp.Click("#alerts-jump", chromedp.ByQuery),
+		chromedp.WaitVisible("#alert-center-dialog[open]", chromedp.ByQuery),
+		chromedp.WaitVisible("#telegram-status", chromedp.ByQuery),
+		chromedp.WaitVisible("#discord-status", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const tg = document.getElementById('telegram-status');
+			const dc = document.getElementById('discord-status');
+			return {
+				telegramConfigured: tg?.dataset.configured || '',
+				telegramText: tg?.textContent || '',
+				discordConfigured: dc?.dataset.configured || '',
+				discordText: dc?.textContent || ''
+			};
+		})()`, &alertDeliveryReport),
+		// Click telegram test button
+		chromedp.Click("#telegram-test", chromedp.ByQuery),
+		chromedp.WaitVisible("#toast-region .toast", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector('#toast-region .toast .toast-message')?.textContent || ''`, &alertDeliveryReport.ToastMessage),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alertDeliveryReport.TelegramConfigured != "true" || !strings.Contains(alertDeliveryReport.TelegramText, "CONFIGURED") {
+		t.Fatalf("telegram delivery not configured in demo: %+v", alertDeliveryReport)
+	}
+	if alertDeliveryReport.DiscordConfigured != "true" || !strings.Contains(alertDeliveryReport.DiscordText, "CONFIGURED") {
+		t.Fatalf("discord delivery not configured in demo: %+v", alertDeliveryReport)
+	}
+	if !strings.Contains(alertDeliveryReport.ToastMessage, "Telegram") {
+		t.Fatalf("expected toast message for telegram test, got %q", alertDeliveryReport.ToastMessage)
+	}
+}
+
+func TestDemoContainerLifecycleAndLightModeContrast(t *testing.T) {
+	chrome := chromePath(t)
+	assets, err := homelab.Static()
+	if err != nil {
+		t.Fatal(err)
+	}
+	static, err := httpapi.NewStaticHandler(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(static)
+	defer server.Close()
+
+	allocatorOptions := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath(chrome), chromedp.Flag("no-sandbox", true), chromedp.Flag("disable-gpu", true))
+	allocator, cancelAllocator := chromedp.NewExecAllocator(context.Background(), allocatorOptions...)
+	defer cancelAllocator()
+
+	ctx, cancel := newBrowserContext(allocator)
+	defer cancel()
+	ctx, timeout := context.WithTimeout(ctx, 30*time.Second)
+	defer timeout()
+
+	var contrastReport struct {
+		DarkModalBg   string `json:"darkModalBg"`
+		LightModalBg  string `json:"lightModalBg"`
+		DarkTextColor string `json:"darkTextColor"`
+		LightTextColor string `json:"lightTextColor"`
+	}
+
+	err = chromedp.Run(ctx,
+		chromedp.EmulateViewport(1440, 900),
+		chromedp.Navigate(server.URL+"/?demo=1"),
+		chromedp.WaitVisible("#dashboard", chromedp.ByQuery),
+		chromedp.Click("#help-open", chromedp.ByQuery),
+		chromedp.WaitVisible("#help-dialog[open]", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const dialog = document.getElementById('help-dialog');
+			return {
+				darkModalBg: window.getComputedStyle(dialog).backgroundColor,
+				darkTextColor: window.getComputedStyle(dialog.querySelector('.help-guide p') || dialog).color
+			};
+		})()`, &contrastReport),
+		chromedp.Click("[data-help-close]", chromedp.ByQuery),
+		// Switch to light theme
+		chromedp.Click("#theme-toggle", chromedp.ByQuery),
+		chromedp.Click("#help-open", chromedp.ByQuery),
+		chromedp.WaitVisible("#help-dialog[open]", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const dialog = document.getElementById('help-dialog');
+			return {
+				lightModalBg: window.getComputedStyle(dialog).backgroundColor,
+				lightTextColor: window.getComputedStyle(dialog.querySelector('.help-guide p') || dialog).color
+			};
+		})()`, &contrastReport),
+		chromedp.Click("[data-help-close]", chromedp.ByQuery),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify solid backgrounds, not transparent
+	if strings.Contains(contrastReport.LightModalBg, "rgba(5, 7, 10, 0.06)") || contrastReport.LightModalBg == "rgba(0, 0, 0, 0)" {
+		t.Fatalf("light mode modal background is transparent: %+v", contrastReport)
+	}
+	if strings.Contains(contrastReport.DarkModalBg, "rgba(8, 12, 16, 0.88)") || contrastReport.DarkModalBg == "rgba(0, 0, 0, 0)" {
+		t.Fatalf("dark mode modal background is transparent: %+v", contrastReport)
+	}
+
+	// Test Container STOP and RESTART
+	var containerReport struct {
+		InitialStopDisabled bool   `json:"initialStopDisabled"`
+		ToastMessage        string `json:"toastMessage"`
+		StoppedState        string `json:"stoppedState"`
+		RestartToastMessage string `json:"restartToastMessage"`
+	}
+
+	err = chromedp.Run(ctx,
+		chromedp.Click(`[data-workspace="containers"]`, chromedp.ByQuery),
+		chromedp.WaitVisible("#containers-list .container-item", chromedp.ByQuery),
+		// Override confirm dialog to auto-accept stop
+		chromedp.Evaluate(`window.confirm = () => true;`, nil),
+		chromedp.Evaluate(`(() => {
+			const immich = document.querySelector('[data-container-id="demo-immich-server"]');
+			const stopBtn = immich?.querySelector('.container-action-danger');
+			return {
+				initialStopDisabled: stopBtn ? stopBtn.disabled : true
+			};
+		})()`, &containerReport),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if containerReport.InitialStopDisabled {
+		t.Fatalf("expected Stop button on running container to be ENABLED, but it was disabled")
+	}
+
+	// Click stop
+	err = chromedp.Run(ctx,
+		chromedp.Click(`[data-container-id="demo-immich-server"] .container-action-danger`, chromedp.ByQuery),
+		chromedp.WaitVisible("#toast-region .toast", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector('#toast-region .toast .toast-message')?.textContent || ''`, &containerReport.ToastMessage),
+		chromedp.Poll(`document.querySelector('[data-container-id="demo-immich-server"] .container-state')?.textContent.toLowerCase().includes('stopped')`, nil, chromedp.WithPollingTimeout(3*time.Second)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(containerReport.ToastMessage, "stopped") {
+		t.Fatalf("expected toast indicating stopped, got %q", containerReport.ToastMessage)
+	}
+
+	// Click restart
+	err = chromedp.Run(ctx,
+		chromedp.Click(`[data-container-id="demo-immich-server"] .container-action-restart`, chromedp.ByQuery),
+		chromedp.WaitVisible("#toast-region .toast", chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelector('#toast-region .toast:last-child .toast-message')?.textContent || ''`, &containerReport.RestartToastMessage),
+		chromedp.Poll(`document.querySelector('[data-container-id="demo-immich-server"] .container-state')?.textContent.toLowerCase().includes('running')`, nil, chromedp.WithPollingTimeout(3*time.Second)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(containerReport.RestartToastMessage, "restart") {
+		t.Fatalf("expected toast indicating restart, got %q", containerReport.RestartToastMessage)
+	}
+
+	// Check light mode health KPI cell background
+	var healthCellBg string
+	err = chromedp.Run(ctx,
+		chromedp.Click(`[data-workspace="overview"]`, chromedp.ByQuery),
+		chromedp.WaitVisible(".health-cell-primary", chromedp.ByQuery),
+		chromedp.Evaluate(`window.getComputedStyle(document.querySelector('.health-cell-primary')).backgroundColor`, &healthCellBg),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(healthCellBg, "rgba(5, 7, 10, 0.45)") {
+		t.Fatalf("health-cell-primary in light mode still has 45%% dark overlay: %s", healthCellBg)
+	}
+}
+
+func TestDemoServicesTLSExpiryAndUDPProbing(t *testing.T) {
+	chrome := chromePath(t)
+	assets, err := homelab.Static()
+	if err != nil {
+		t.Fatal(err)
+	}
+	static, err := httpapi.NewStaticHandler(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(static)
+	defer server.Close()
+
+	allocatorOptions := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath(chrome), chromedp.Flag("no-sandbox", true), chromedp.Flag("disable-gpu", true))
+	allocator, cancelAllocator := chromedp.NewExecAllocator(context.Background(), allocatorOptions...)
+	defer cancelAllocator()
+
+	ctx, cancel := newBrowserContext(allocator)
+	defer cancel()
+	ctx, timeout := context.WithTimeout(ctx, 30*time.Second)
+	defer timeout()
+
+	var tlsBadges []struct {
+		Text   string `json:"text"`
+		Status string `json:"status"`
+	}
+	var wireguardText string
+	var attentionCount int
+
+	err = chromedp.Run(ctx,
+		chromedp.EmulateViewport(1440, 900),
+		chromedp.Navigate(server.URL+"/?demo=1#services"),
+		chromedp.WaitVisible(".services-grid .service-card", chromedp.ByQuery),
+		chromedp.Evaluate(`Array.from(document.querySelectorAll('.service-tls-badge:not([hidden])')).map(el => ({
+			text: el.textContent.trim(),
+			status: el.dataset.tlsStatus || ''
+		}))`, &tlsBadges),
+		chromedp.Evaluate(`document.querySelector('[data-service-id="svc_wireguard"] .service-endpoint')?.textContent || ''`, &wireguardText),
+		// Click Needs Attention filter
+		chromedp.Click(`[data-service-filter="attention"]`, chromedp.ByQuery),
+		chromedp.Evaluate(`document.querySelectorAll('.service-card:not([hidden])').length`, &attentionCount),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(tlsBadges) < 3 {
+		t.Fatalf("expected at least 3 visible TLS badges, got %d: %+v", len(tlsBadges), tlsBadges)
+	}
+
+	foundImmichTLS := false
+	foundCriticalTLS := false
+	for _, badge := range tlsBadges {
+		if strings.Contains(badge.Text, "TLS 74d") {
+			foundImmichTLS = true
+		}
+		if strings.Contains(badge.Text, "TLS 2d") && badge.Status == "critical" {
+			foundCriticalTLS = true
+		}
+	}
+	if !foundImmichTLS {
+		t.Fatalf("expected to find Immich TLS badge 'TLS 74d', got %+v", tlsBadges)
+	}
+	if !foundCriticalTLS {
+		t.Fatalf("expected to find Hermes critical TLS badge 'TLS 2d', got %+v", tlsBadges)
+	}
+
+	if !strings.Contains(wireguardText, "51820") {
+		t.Fatalf("expected WireGuard endpoint to contain 51820, got %q", wireguardText)
+	}
+
+	if attentionCount != 2 {
+		t.Fatalf("expected 2 services in Needs Attention filter (fastCRW warning + Hermes critical), got %d", attentionCount)
+	}
+}
+
+func TestDemoPublicStatusMode(t *testing.T) {
+	chrome := chromePath(t)
+	assets, err := homelab.Static()
+	if err != nil {
+		t.Fatal(err)
+	}
+	static, err := httpapi.NewStaticHandler(assets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(static)
+	defer server.Close()
+
+	allocatorOptions := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.ExecPath(chrome), chromedp.Flag("no-sandbox", true), chromedp.Flag("disable-gpu", true))
+	allocator, cancelAllocator := chromedp.NewExecAllocator(context.Background(), allocatorOptions...)
+	defer cancelAllocator()
+
+	ctx, cancel := newBrowserContext(allocator)
+	defer cancel()
+	ctx, timeout := context.WithTimeout(ctx, 30*time.Second)
+	defer timeout()
+
+	var modeReport struct {
+		BodyMode       string `json:"bodyMode"`
+		SidebarDisplay string `json:"sidebarDisplay"`
+		HelpDisplay    string `json:"helpDisplay"`
+	}
+
+	err = chromedp.Run(ctx,
+		chromedp.EmulateViewport(1440, 900),
+		chromedp.Navigate(server.URL+"/?demo=1&mode=status"),
+		chromedp.WaitVisible(".dashboard-workspace", chromedp.ByQuery),
+		chromedp.Evaluate(`(() => {
+			const sidebar = document.querySelector('.app-sidebar');
+			const help = document.getElementById('help-open');
+			return {
+				bodyMode: document.body.dataset.mode || '',
+				sidebarDisplay: sidebar ? window.getComputedStyle(sidebar).display : 'none',
+				helpDisplay: help ? window.getComputedStyle(help).display : 'none'
+			};
+		})()`, &modeReport),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if modeReport.BodyMode != "status" {
+		t.Fatalf("expected body[data-mode='status'], got %q", modeReport.BodyMode)
+	}
+	if modeReport.SidebarDisplay != "none" {
+		t.Fatalf("expected sidebar to be hidden (display: none) in status mode, got %q", modeReport.SidebarDisplay)
+	}
+	if modeReport.HelpDisplay != "none" {
+		t.Fatalf("expected help button to be hidden (display: none) in status mode, got %q", modeReport.HelpDisplay)
+	}
+}
+
+

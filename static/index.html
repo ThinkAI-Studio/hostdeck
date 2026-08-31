@@ -29,14 +29,23 @@
   <noscript><div class="noscript-banner">This dashboard requires JavaScript.</div></noscript>
 
   <header class="app-header" role="banner">
-    <button id="sidebar-open" class="icon-button sidebar-open" type="button" aria-label="Open workspace navigation" aria-controls="workspace-sidebar" aria-expanded="false" title="Open navigation">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
-    </button>
-    <a class="brand" href="./" aria-label="HostDeck home">
-      <span class="brand-name">HOSTDECK</span>
-    </a>
+    <div class="header-left">
+      <button id="sidebar-open" class="icon-button sidebar-open" type="button" aria-label="Open workspace navigation" aria-controls="workspace-sidebar" aria-expanded="false" title="Open navigation">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <a class="brand" href="./" aria-label="HostDeck home">
+        <span class="brand-name">HOSTDECK</span>
+      </a>
+    </div>
+
     <div class="header-status" aria-label="Current dashboard session">
       <span id="demo-badge" class="badge badge-demo" hidden>DEMO</span>
+      <button id="alerts-jump" class="icon-button alerts-jump" type="button" title="Jump to alert center" aria-label="Open alert center">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+      </button>
       <label class="node-switcher" title="Select monitoring node">
         <span class="visually-hidden">Monitoring node</span>
         <span class="node-switcher-dot status-dot" aria-hidden="true"></span>
@@ -50,9 +59,6 @@
       </span>
       <span id="snapshot-partial" class="connection-chip" data-state="partial" aria-label="Partial metrics snapshot" hidden>PARTIAL</span>
       <span id="header-hostname" class="header-hostname mono" title="Server hostname">—</span>
-      <button id="alerts-jump" class="icon-button" type="button" title="Open alert center" aria-label="Open alert center">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
-      </button>
       <button id="nodes-open" class="icon-button admin-only" type="button" title="Manage monitoring nodes" aria-label="Manage monitoring nodes">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01M11 7h7M11 17h7"/></svg>
       </button>
@@ -64,7 +70,7 @@
         <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"/></svg>
       </button>
       <button id="help-open" class="icon-button" type="button" title="How to use HostDeck" aria-label="How to use HostDeck" aria-haspopup="dialog" aria-controls="help-dialog">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.4 2.4c-.6.25-1.4.6-1.4 1.6v.5"/><path d="M12 17h.01"/></svg>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
       </button>
       <div id="session-identity" class="user-chip" role="group" aria-label="Authenticated Tailscale user" title="Authenticated Tailscale user">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
@@ -603,8 +609,8 @@
         <label><span>CATEGORY</span><input name="category" type="text" maxlength="40" placeholder="Uncategorized"></label>
         <label><span>TAGS <small>(comma separated)</small></span><input name="tags" type="text" maxlength="160" placeholder="ops, internal"></label>
         <label class="full"><span>DISPLAY URL OR PORT</span><input name="displayUrl" type="text" maxlength="300" placeholder="8080 or https://service.tailnet.ts.net" required></label>
-        <label><span>PROBE TYPE</span><select name="probeType"><option value="none">NONE</option><option value="http">HTTP / HTTPS</option><option value="tcp">TCP</option><option value="dns">DNS</option></select></label>
-        <label><span>PROBE ENDPOINT <small>(optional)</small></span><input name="probeUrl" type="text" maxlength="300" placeholder="https://service.tailnet.ts.net/health" autocapitalize="off" spellcheck="false"></label>
+        <label><span>PROBE TYPE</span><select name="probeType"><option value="none">NONE</option><option value="http">HTTP / HTTPS</option><option value="tcp">TCP</option><option value="udp">UDP</option><option value="dns">DNS</option></select></label>
+        <label><span>PROBE ENDPOINT <small>(optional)</small></span><input name="probeUrl" type="text" maxlength="300" placeholder="https://... / tcp://... / udp://..." autocapitalize="off" spellcheck="false"></label>
       </div>
       <p id="service-form-error" class="form-error" role="alert" hidden></p>
       <footer><button class="button button-ghost" type="button" data-dialog-close>CANCEL</button><button id="service-form-submit" class="button button-primary" type="submit">ADD SERVICE</button></footer>
@@ -751,6 +757,14 @@
           <div class="subsection-header"><h3 id="webhook-title">WEBHOOK DELIVERY</h3><button id="webhook-test" class="button button-ghost button-small admin-only" type="button" disabled>TEST POST</button></div>
           <p id="webhook-status" class="integration-status mono">Checking configuration…</p>
         </section>
+        <section class="notification-section" aria-labelledby="telegram-title">
+          <div class="subsection-header"><h3 id="telegram-title">TELEGRAM DELIVERY</h3><button id="telegram-test" class="button button-ghost button-small admin-only" type="button" disabled>TEST PUSH</button></div>
+          <p id="telegram-status" class="integration-status mono">Checking configuration…</p>
+        </section>
+        <section class="notification-section" aria-labelledby="discord-title">
+          <div class="subsection-header"><h3 id="discord-title">DISCORD DELIVERY</h3><button id="discord-test" class="button button-ghost button-small admin-only" type="button" disabled>TEST PUSH</button></div>
+          <p id="discord-status" class="integration-status mono">Checking configuration…</p>
+        </section>
       </div>
     </div>
   </dialog>
@@ -870,7 +884,13 @@
     <div class="modal-form help-layout">
       <header class="help-header">
         <div><h2 id="help-title">How to use HostDeck</h2><p class="help-sub">What you're looking at and what it needs from you.</p></div>
-        <button class="icon-button" type="button" data-help-close aria-label="Close help">×</button>
+        <div class="help-header-actions">
+          <button id="tour-start-btn" class="button button-primary tour-start-btn" type="button" title="Start guided tour">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            <span>Interactive Tour</span>
+          </button>
+          <button class="icon-button" type="button" data-help-close aria-label="Close help">×</button>
+        </div>
       </header>
       <nav class="help-nav" aria-label="Help topics">
         <button type="button" class="help-nav-item" data-help-target="overview">Overview</button>
@@ -951,6 +971,27 @@
     <button id="overview-widget-menu-reset" class="text-button widget-menu-action" type="button" role="menuitem">RESET OVERVIEW</button>
   </div>
   <div id="dashboard-status" class="visually-hidden" role="status" aria-live="polite" aria-atomic="true"></div>
+
+  <div id="tour-backdrop" class="tour-backdrop" hidden aria-hidden="true"></div>
+  <div id="tour-highlight" class="tour-highlight" hidden aria-hidden="true"></div>
+  <div id="tour-popover" class="tour-popover" role="dialog" aria-modal="true" aria-labelledby="tour-title" aria-describedby="tour-desc" hidden>
+    <div class="tour-popover-header">
+      <span id="tour-step-badge" class="tour-badge mono">STEP 1 OF 8</span>
+      <span id="tour-hotkey-badge" class="tour-hotkey mono"></span>
+      <button id="tour-close-btn" class="icon-button tour-close-btn" type="button" aria-label="Exit tour" title="Exit tour (Esc)">×</button>
+    </div>
+    <div class="tour-popover-body">
+      <h3 id="tour-title" class="tour-title"></h3>
+      <p id="tour-desc" class="tour-desc"></p>
+    </div>
+    <div class="tour-popover-footer">
+      <button id="tour-skip-btn" class="text-button tour-skip-btn" type="button">Skip Tour</button>
+      <div class="tour-nav-buttons">
+        <button id="tour-prev-btn" class="button button-ghost" type="button">Back</button>
+        <button id="tour-next-btn" class="button button-primary" type="button">Next</button>
+      </div>
+    </div>
+  </div>
 
   <script src="./lib/chart.umd.min.js"></script>
   <script src="./js/vendor/dagre.min.js"></script>

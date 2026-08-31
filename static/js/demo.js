@@ -6,18 +6,73 @@ const DEMO_LAUNCHPAD_KEY = "homelab.demo.launchpad";
 const DEMO_NOTE_KEY = "homelab.demo.operator-note";
 
 const demoServices = [
-  { id: "svc_immich", name: "Immich", category: "Media", tags: ["photos"], displayUrl: "https://immich.homelab.ts.net", probeUrl: "http://100.64.0.10:2283/api/server/ping", status: "up", latencyMs: 12, lastCheckedAt: nowIso() },
-  { id: "svc_crw", name: "fastCRW", category: "Tools", tags: ["internal"], displayUrl: "https://crw.homelab.ts.net", probeUrl: "http://100.64.0.11:3000/health", status: "up", latencyMs: 7, lastCheckedAt: nowIso() },
-  { id: "svc_hermes", name: "Hermes", category: "Automation", tags: [], displayUrl: "https://bot.homelab.ts.net", probeUrl: "", status: "unknown", latencyMs: null, lastCheckedAt: null },
-  { id: "svc_glance", name: "Glance", category: "Monitoring", tags: ["ops"], displayUrl: "https://glance.homelab.ts.net", probeUrl: "http://100.64.0.12:8082/health", status: "up", latencyMs: 18, lastCheckedAt: nowIso() },
+  {
+    id: "svc_immich",
+    name: "Immich",
+    category: "Media",
+    tags: ["photos"],
+    displayUrl: "https://immich.homelab.ts.net",
+    probeUrl: "http://100.64.0.10:2283/api/server/ping",
+    status: "up",
+    latencyMs: 12,
+    lastCheckedAt: nowIso(),
+    tlsCert: { issuer: "Let's Encrypt Authority X3", notAfter: new Date(Date.now() + 74 * 86400000).toISOString(), daysLeft: 74, status: "ok" }
+  },
+  {
+    id: "svc_wireguard",
+    name: "WireGuard VPN",
+    category: "Network",
+    tags: ["vpn", "udp"],
+    displayUrl: "https://vpn.homelab.ts.net:51820",
+    probeUrl: "udp://10.0.0.1:51820",
+    status: "up",
+    latencyMs: 3,
+    lastCheckedAt: nowIso()
+  },
+  {
+    id: "svc_crw",
+    name: "fastCRW",
+    category: "Tools",
+    tags: ["internal"],
+    displayUrl: "https://crw.homelab.ts.net",
+    probeUrl: "http://100.64.0.11:3000/health",
+    status: "up",
+    latencyMs: 7,
+    lastCheckedAt: nowIso(),
+    tlsCert: { issuer: "ZeroSSL RSA Domain Secure Site CA", notAfter: new Date(Date.now() + 12 * 86400000).toISOString(), daysLeft: 12, status: "warning" }
+  },
+  {
+    id: "svc_hermes",
+    name: "Hermes",
+    category: "Automation",
+    tags: [],
+    displayUrl: "https://bot.homelab.ts.net",
+    probeUrl: "",
+    status: "unknown",
+    latencyMs: null,
+    lastCheckedAt: null,
+    tlsCert: { issuer: "Let's Encrypt Authority X3", notAfter: new Date(Date.now() + 2 * 86400000).toISOString(), daysLeft: 2, status: "critical" }
+  },
+  {
+    id: "svc_glance",
+    name: "Glance",
+    category: "Monitoring",
+    tags: ["ops"],
+    displayUrl: "https://glance.homelab.ts.net",
+    probeUrl: "http://100.64.0.12:8082/health",
+    status: "up",
+    latencyMs: 18,
+    lastCheckedAt: nowIso(),
+    tlsCert: { issuer: "Tailscale Local Root CA", notAfter: new Date(Date.now() + 90 * 86400000).toISOString(), daysLeft: 90, status: "ok" }
+  },
 ];
 
 const demoContainers = [
-  { id: edgeMode ? edgeContainerID : "demo-immich-server", name: "immich_server", image: "ghcr.io/immich-app/immich-server:release", state: "running", health: "healthy", uptimeSeconds: 184320, cpuUsagePercent: 2.1, cpuNormalizedPercent: 2.1, memoryUsageBytes: 471859200, memoryLimitBytes: 8589934592, ports: ["2283→0.0.0.0"], restartCount: 0 },
-  { id: "demo-immich-redis", name: "immich_redis", image: "docker.io/valkey/valkey:8", state: "running", health: "healthy", uptimeSeconds: 184300, cpuUsagePercent: 0.1, cpuNormalizedPercent: 0.1, memoryUsageBytes: 33554432, memoryLimitBytes: 1073741824, ports: ["6379/tcp"], restartCount: 4 },
-  { id: "demo-fastcrw", name: "crw", image: "localhost/fastcrw:latest", state: "running", health: "healthy", uptimeSeconds: 14800, cpuUsagePercent: 0.8, cpuNormalizedPercent: 0.8, memoryUsageBytes: 125829120, memoryLimitBytes: 536870912, ports: ["3000→host"], restartCount: 1 },
-  { id: "demo-worker", name: "ml_worker", image: "localhost/ml-worker:latest", state: "stopped", uptimeSeconds: 0, cpuUsagePercent: 0, memoryUsageBytes: 0, memoryLimitBytes: 2147483648, ports: [], restartCount: 0 },
-  ...(edgeMode ? [{ id: "demo-history-long-resource", name: "transcoding_machine_learning_worker_for_archived_photos_and_videos", image: "localhost/history-fixture:latest", state: "running", health: "healthy", uptimeSeconds: 3200, cpuUsagePercent: 1.2, memoryUsageBytes: 104857600, memoryLimitBytes: 1073741824, ports: [], restartCount: 0 }] : []),
+  { id: edgeMode ? edgeContainerID : "demo-immich-server", name: "immich_server", image: "ghcr.io/immich-app/immich-server:release", state: "running", health: "healthy", uptimeSeconds: 184320, cpuUsagePercent: 2.1, cpuNormalizedPercent: 2.1, memoryUsageBytes: 471859200, memoryLimitBytes: 8589934592, ports: ["2283→0.0.0.0"], restartCount: 0, actions: { logs: true, exec: true, restart: true, stop: true } },
+  { id: "demo-immich-redis", name: "immich_redis", image: "docker.io/valkey/valkey:8", state: "running", health: "healthy", uptimeSeconds: 184300, cpuUsagePercent: 0.1, cpuNormalizedPercent: 0.1, memoryUsageBytes: 33554432, memoryLimitBytes: 1073741824, ports: ["6379/tcp"], restartCount: 4, actions: { logs: true, exec: true, restart: true, stop: true } },
+  { id: "demo-fastcrw", name: "crw", image: "localhost/fastcrw:latest", state: "running", health: "healthy", uptimeSeconds: 14800, cpuUsagePercent: 0.8, cpuNormalizedPercent: 0.8, memoryUsageBytes: 125829120, memoryLimitBytes: 536870912, ports: ["3000→host"], restartCount: 1, actions: { logs: true, exec: true, restart: true, stop: true } },
+  { id: "demo-worker", name: "ml_worker", image: "localhost/ml-worker:latest", state: "stopped", uptimeSeconds: 0, cpuUsagePercent: 0, memoryUsageBytes: 0, memoryLimitBytes: 2147483648, ports: [], restartCount: 0, actions: { logs: true, exec: false, restart: true, stop: false } },
+  ...(edgeMode ? [{ id: "demo-history-long-resource", name: "transcoding_machine_learning_worker_for_archived_photos_and_videos", image: "localhost/history-fixture:latest", state: "running", health: "healthy", uptimeSeconds: 3200, cpuUsagePercent: 1.2, memoryUsageBytes: 104857600, memoryLimitBytes: 1073741824, ports: [], restartCount: 0, actions: { logs: true, exec: true, restart: true, stop: true } }] : []),
 ];
 
 let sequence = 0;
@@ -260,6 +315,44 @@ export class DemoApi {
     const index = demoServices.findIndex((item) => item.id === id);
     if (index >= 0) demoServices.splice(index, 1);
     return null;
+  }
+
+  async restartContainer(id, nodeId = "local") {
+    const container = demoContainers.find((item) => item.id === id);
+    if (container) {
+      container.state = "running";
+      container.health = "healthy";
+      container.restartCount = 0;
+      container.uptimeSeconds = 1;
+    }
+    return { status: "restarted" };
+  }
+
+  async stopContainer(id, nodeId = "local") {
+    const container = demoContainers.find((item) => item.id === id);
+    if (container) {
+      container.state = "stopped";
+      container.health = "";
+      container.uptimeSeconds = 0;
+      container.cpuUsagePercent = 0;
+      container.cpuNormalizedPercent = 0;
+    }
+    return { status: "stopped" };
+  }
+
+  async inspectContainer(id, nodeId = "local") {
+    const container = demoContainers.find((item) => item.id === id) || { id, name: id, image: "unknown", state: "running", ports: [] };
+    return {
+      id: container.id,
+      name: container.name,
+      image: container.image,
+      created: "2026-08-01T10:00:00Z",
+      state: { status: container.state, running: container.state === "running", exitCode: 0 },
+      restartPolicy: "unless-stopped",
+      mounts: [{ source: "/var/data/" + container.name, destination: "/data" }],
+      env: ["NODE_ENV=production", "PORT=8080", "LOG_LEVEL=info"],
+      networkSettings: { ipAddress: "10.88.0.5", ports: container.ports || [] },
+    };
   }
 
   async cancelTerminalSession() { return null; }
