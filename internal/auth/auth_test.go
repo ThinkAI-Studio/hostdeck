@@ -98,3 +98,55 @@ func TestStartingSessionsCapsEachLogin(t *testing.T) {
 		t.Fatalf("new session rejected: %v", err)
 	}
 }
+
+func TestMultiProviderForwardAuthHeaders(t *testing.T) {
+	// Manager with trusted CIDR 192.168.1.0/24
+	m := NewManager([]string{"admin@homelab.internal"}, true, false, "192.168.1.0/24")
+
+	// 1. Cloudflare Access
+	cfReq := httptest.NewRequest(http.MethodGet, "http://dashboard.test/", nil)
+	cfReq.RemoteAddr = "192.168.1.50:54321"
+	cfReq.Header.Set("Cf-Access-Authenticated-User-Email", "admin@homelab.internal")
+	cfReq.Header.Set("Cf-Access-Authenticated-User-Name", "Admin Homelab")
+	cfPrincipal, err := m.PrincipalFromRequest(cfReq)
+	if err != nil {
+		t.Fatalf("Cloudflare auth failed: %v", err)
+	}
+	if cfPrincipal.Provider != "cloudflare" || cfPrincipal.Role != RoleAdmin || cfPrincipal.Name != "Admin Homelab" {
+		t.Fatalf("unexpected Cloudflare principal: %#v", cfPrincipal)
+	}
+
+	// 2. Authentik / Authelia (Remote-Email / Remote-User)
+	authReq := httptest.NewRequest(http.MethodGet, "http://dashboard.test/", nil)
+	authReq.RemoteAddr = "127.0.0.1:4000"
+	authReq.Header.Set("Remote-User", "viewer@homelab.internal")
+	authReq.Header.Set("Remote-Name", "Viewer User")
+	authPrincipal, err := m.PrincipalFromRequest(authReq)
+	if err != nil {
+		t.Fatalf("Authentik auth failed: %v", err)
+	}
+	if authPrincipal.Provider != "authentik" || authPrincipal.Role != RoleViewer || authPrincipal.Name != "Viewer User" {
+		t.Fatalf("unexpected Authentik principal: %#v", authPrincipal)
+	}
+
+	// 3. Traefik ForwardAuth (X-Auth-Request-Email)
+	trReq := httptest.NewRequest(http.MethodGet, "http://dashboard.test/", nil)
+	trReq.RemoteAddr = "192.168.1.10:3000"
+	trReq.Header.Set("X-Auth-Request-Email", "admin@homelab.internal")
+	trPrincipal, err := m.PrincipalFromRequest(trReq)
+	if err != nil {
+		t.Fatalf("Traefik auth failed: %v", err)
+	}
+	if trPrincipal.Provider != "traefik" || trPrincipal.Role != RoleAdmin {
+		t.Fatalf("unexpected Traefik principal: %#v", trPrincipal)
+	}
+
+	// 4. Untrusted IP outside CIDR
+	untrustedReq := httptest.NewRequest(http.MethodGet, "http://dashboard.test/", nil)
+	untrustedReq.RemoteAddr = "10.0.0.99:1234"
+	untrustedReq.Header.Set("Cf-Access-Authenticated-User-Email", "admin@homelab.internal")
+	if _, err := m.PrincipalFromRequest(untrustedReq); err != ErrUntrustedIdentity {
+		t.Fatalf("expected ErrUntrustedIdentity for untrusted remote IP, got: %v", err)
+	}
+}
+

@@ -35,6 +35,7 @@ type Config struct {
 	HomelabMountPoints     []string
 	TailscaleSOCKS5Address string
 	TrustTailscaleHeaders  bool
+	TrustedProxies         []string
 	HistoryQuotaBytes      int64
 	NTFYURL                string
 	NTFYTopic              string
@@ -116,6 +117,16 @@ func LoadFrom(getenv func(string) string) (Config, error) {
 		if err != nil {
 			return Config{}, fmt.Errorf("TRUST_TAILSCALE_HEADERS: %w", err)
 		}
+	}
+	if value := strings.TrimSpace(getenv("TRUST_PROXY_HEADERS")); value != "" {
+		trust, parseErr := strconv.ParseBool(value)
+		if parseErr != nil {
+			return Config{}, fmt.Errorf("TRUST_PROXY_HEADERS: %w", parseErr)
+		}
+		cfg.TrustTailscaleHeaders = trust
+	}
+	if value := strings.TrimSpace(getenv("TRUSTED_PROXIES")); value != "" {
+		cfg.TrustedProxies = splitList(value)
 	}
 	if value := strings.TrimSpace(getenv("HOST_SHELL_ENABLED")); value != "" {
 		cfg.HostShellEnabled, err = strconv.ParseBool(value)

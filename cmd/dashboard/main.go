@@ -159,7 +159,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("load active alert state for reconciliation: %w", err)
 	}
-	alertDeliveryEnabled := cfg.NTFYURL != "" || cfg.WebhookURL != ""
+	alertDeliveryEnabled := cfg.NTFYURL != "" || cfg.WebhookURL != "" || (cfg.TelegramBotTokenFile != "" && cfg.TelegramChatID != "") || cfg.DiscordWebhookURL != ""
 	alertEngine, err := alerts.NewEngineWithOptions(database, nil, alerts.EngineOptions{DeliveryEnabled: alertDeliveryEnabled, Maintenance: database})
 	if err != nil {
 		return fmt.Errorf("configure alert engine: %w", err)
@@ -214,9 +214,12 @@ func run() error {
 	var notificationSender alerts.Sender
 	var ntfyNotificationSender alerts.Sender
 	var webhookNotificationSender alerts.Sender
+	var telegramNotificationSender alerts.Sender
+	var discordNotificationSender alerts.Sender
 	var deliveryProcessor *alerts.DeliveryProcessor
 	ntfyTokenSet := false
 	webhookSecretSet := false
+	telegramBotTokenSet := false
 	var senders []alerts.Sender
 	if cfg.NTFYURL != "" {
 		token, err := loadSecretFile(cfg.NTFYTokenFile)
@@ -251,6 +254,7 @@ func run() error {
 		if tokenErr != nil {
 			return fmt.Errorf("load telegram bot token: %w", tokenErr)
 		}
+		telegramBotTokenSet = token != ""
 		if token != "" {
 			configuredSender, senderErr := alerts.NewTelegramSender(alerts.TelegramConfig{
 				BotToken: token,
@@ -259,6 +263,7 @@ func run() error {
 			if senderErr != nil {
 				return fmt.Errorf("configure telegram: %w", senderErr)
 			}
+			telegramNotificationSender = configuredSender
 			senders = append(senders, configuredSender)
 		}
 	}
@@ -269,6 +274,7 @@ func run() error {
 		if senderErr != nil {
 			return fmt.Errorf("configure discord: %w", senderErr)
 		}
+		discordNotificationSender = configuredSender
 		senders = append(senders, configuredSender)
 	}
 	if len(senders) > 0 {
@@ -302,7 +308,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	authManager := auth.NewManager(cfg.AdminUsers, cfg.TrustTailscaleHeaders, cfg.TrustTailscaleHeaders)
+	authManager := auth.NewManager(cfg.AdminUsers, cfg.TrustTailscaleHeaders, cfg.TrustTailscaleHeaders, cfg.TrustedProxies...)
 	api, err := httpapi.New(httpapi.Options{
 		Auth: authManager, Metrics: hub, Services: serviceManager, Audit: database,
 		Terminal: terminalManager, Static: staticHandler, SecureOrigin: cfg.TrustTailscaleHeaders,
@@ -311,6 +317,9 @@ func run() error {
 		History: database, HistoryQuota: historyWriter.QuotaState,
 		Alerts: database, Notifications: notificationSender, NTFYURL: cfg.NTFYURL, NTFYTopic: cfg.NTFYTopic, NTFYTokenSet: ntfyTokenSet,
 		NTFYNotifications: ntfyNotificationSender, WebhookNotifications: webhookNotificationSender,
+		TelegramNotifications: telegramNotificationSender, DiscordNotifications: discordNotificationSender,
+		TelegramChatID: cfg.TelegramChatID, TelegramBotTokenSet: telegramBotTokenSet,
+		DiscordWebhookURL: cfg.DiscordWebhookURL,
 		WebhookURL: cfg.WebhookURL, WebhookSecretSet: webhookSecretSet,
 		DashboardConfig:        dashboardConfig,
 		DashboardConfigApplied: serviceManager.InvalidateHealth,

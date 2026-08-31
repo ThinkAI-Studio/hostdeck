@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
@@ -24,17 +25,18 @@ const (
 )
 
 var (
-	ErrMissingIdentity   = errors.New("missing Tailscale identity")
-	ErrUntrustedIdentity = errors.New("Tailscale identity headers are not trusted for this request")
+	ErrMissingIdentity   = errors.New("missing identity header")
+	ErrUntrustedIdentity = errors.New("identity headers are not trusted for this request")
 	ErrInvalidSession    = errors.New("invalid session")
 	ErrInvalidCSRF       = errors.New("invalid CSRF token")
 	ErrInvalidOrigin     = errors.New("invalid request origin")
 )
 
 type Principal struct {
-	Login string `json:"login"`
-	Name  string `json:"name,omitempty"`
-	Role  string `json:"role"`
+	Login    string `json:"login"`
+	Name     string `json:"name,omitempty"`
+	Role     string `json:"role"`
+	Provider string `json:"provider,omitempty"`
 }
 
 type Session struct {
@@ -47,43 +49,121 @@ type Session struct {
 }
 
 type Manager struct {
-	mu           sync.Mutex
-	admins       map[string]struct{}
-	sessions     map[string]Session
-	now          func() time.Time
-	secure       bool
-	trustHeaders bool
+	mu             sync.Mutex
+	admins         map[string]struct{}
+	sessions       map[string]Session
+	now            func() time.Time
+	secure         bool
+	trustHeaders   bool
+	trustedProxies []netip.Prefix
 }
 
-func NewManager(adminLogins []string, trustTailscaleHeaders, secureCookies bool) *Manager {
+func NewManager(adminLogins []string, trustHeaders, secureCookies bool, trustedCIDRs ...string) *Manager {
 	admins := make(map[string]struct{}, len(adminLogins))
 	for _, login := range adminLogins {
 		if normalized := normalizeLogin(login); normalized != "" {
 			admins[normalized] = struct{}{}
 		}
 	}
+	var prefixes []netip.Prefix
+	for _, cidr := range trustedCIDRs {
+		cidr = strings.TrimSpace(cidr)
+		if cidr == "" {
+			continue
+		}
+		if prefix, err := netip.ParsePrefix(cidr); err == nil {
+			prefixes = append(prefixes, prefix)
+		} else if addr, err := netip.ParseAddr(cidr); err == nil {
+			if addr.Is4() {
+				prefixes = append(prefixes, netip.PrefixFrom(addr, 32))
+			} else {
+				prefixes = append(prefixes, netip.PrefixFrom(addr, 128))
+			}
+		}
+	}
 	return &Manager{
-		admins:       admins,
-		sessions:     make(map[string]Session),
-		now:          time.Now,
-		secure:       secureCookies,
-		trustHeaders: trustTailscaleHeaders,
+		admins:         admins,
+		sessions:       make(map[string]Session),
+		now:            time.Now,
+		secure:         secureCookies,
+		trustHeaders:   trustHeaders,
+		trustedProxies: prefixes,
 	}
 }
 
 func (m *Manager) PrincipalFromRequest(r *http.Request) (Principal, error) {
-	if !m.trustHeaders || !remoteIsLoopback(r.RemoteAddr) {
+	if !m.trustHeaders || !m.remoteIsTrusted(r.RemoteAddr) {
 		return Principal{}, ErrUntrustedIdentity
 	}
-	login := normalizeLogin(r.Header.Get("Tailscale-User-Login"))
-	if login == "" {
-		return Principal{}, ErrMissingIdentity
+
+	// 1. Tailscale headers
+	if login := normalizeLogin(r.Header.Get("Tailscale-User-Login")); login != "" {
+		return m.buildPrincipal(login, r.Header.Get("Tailscale-User-Name"), "tailscale"), nil
 	}
+
+	// 2. Cloudflare Access
+	if login := normalizeLogin(r.Header.Get("Cf-Access-Authenticated-User-Email")); login != "" {
+		return m.buildPrincipal(login, r.Header.Get("Cf-Access-Authenticated-User-Name"), "cloudflare"), nil
+	}
+
+	// 3. Authelia / Authentik / Reverse Proxy headers
+	if login := normalizeLogin(r.Header.Get("Remote-Email")); login != "" {
+		name := strings.TrimSpace(r.Header.Get("Remote-Name"))
+		if name == "" {
+			name = strings.TrimSpace(r.Header.Get("Remote-User"))
+		}
+		return m.buildPrincipal(login, name, "authentik"), nil
+	}
+	if login := normalizeLogin(r.Header.Get("Remote-User")); login != "" {
+		return m.buildPrincipal(login, r.Header.Get("Remote-Name"), "authentik"), nil
+	}
+	if login := normalizeLogin(r.Header.Get("X-Forwarded-User")); login != "" {
+		return m.buildPrincipal(login, r.Header.Get("X-Forwarded-Email"), "proxy"), nil
+	}
+
+	// 4. Traefik ForwardAuth
+	if login := normalizeLogin(r.Header.Get("X-Auth-Request-Email")); login != "" {
+		return m.buildPrincipal(login, r.Header.Get("X-Auth-Request-User"), "traefik"), nil
+	}
+	if login := normalizeLogin(r.Header.Get("X-Auth-Request-User")); login != "" {
+		return m.buildPrincipal(login, "", "traefik"), nil
+	}
+
+	return Principal{}, ErrMissingIdentity
+}
+
+func (m *Manager) buildPrincipal(login, name, provider string) Principal {
 	role := RoleViewer
 	if _, ok := m.admins[login]; ok {
 		role = RoleAdmin
 	}
-	return Principal{Login: login, Name: strings.TrimSpace(r.Header.Get("Tailscale-User-Name")), Role: role}, nil
+	return Principal{
+		Login:    login,
+		Name:     strings.TrimSpace(name),
+		Role:     role,
+		Provider: provider,
+	}
+}
+
+func (m *Manager) remoteIsTrusted(remoteAddress string) bool {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(remoteAddress))
+	if err != nil {
+		host = strings.TrimSpace(remoteAddress)
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	addr = addr.Unmap()
+	if addr.IsLoopback() {
+		return true
+	}
+	for _, prefix := range m.trustedProxies {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }
 
 func remoteIsLoopback(remoteAddress string) bool {
