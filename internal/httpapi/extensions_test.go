@@ -240,6 +240,89 @@ func TestNTFYStatusRedactsDestinationForViewer(t *testing.T) {
 	}
 }
 
+func TestTelegramAndDiscordStatusAndTestDelivery(t *testing.T) {
+	server, _, notifications := newExtensionTestServer(t)
+
+	csrf, adminCookie, _ := startTestBrowserSession(t, server, "admin@example.com")
+
+	// Telegram admin status
+	adminTgReq := authenticatedRead("/api/v1/notifications/telegram", "admin@example.com", adminCookie)
+	adminTgResp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(adminTgResp, adminTgReq)
+	if adminTgResp.Code != http.StatusOK {
+		t.Fatalf("admin telegram status=%d body=%s", adminTgResp.Code, adminTgResp.Body.String())
+	}
+	var tgStatus map[string]any
+	if err := json.Unmarshal(adminTgResp.Body.Bytes(), &tgStatus); err != nil {
+		t.Fatal(err)
+	}
+	if tgStatus["configured"] != true || tgStatus["tokenConfigured"] != true || tgStatus["chatId"] != "123456789" {
+		t.Fatalf("admin telegram status unexpected: %+v", tgStatus)
+	}
+
+	// Discord admin status
+	adminDcReq := authenticatedRead("/api/v1/notifications/discord", "admin@example.com", adminCookie)
+	adminDcResp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(adminDcResp, adminDcReq)
+	if adminDcResp.Code != http.StatusOK {
+		t.Fatalf("admin discord status=%d body=%s", adminDcResp.Code, adminDcResp.Body.String())
+	}
+	var dcStatus map[string]any
+	if err := json.Unmarshal(adminDcResp.Body.Bytes(), &dcStatus); err != nil {
+		t.Fatal(err)
+	}
+	if dcStatus["configured"] != true || dcStatus["url"] != "https://discord.example.com/webhook" {
+		t.Fatalf("admin discord status unexpected: %+v", dcStatus)
+	}
+
+	// Test Telegram mutation
+	initialSent := notifications.sent
+	testTgReq := authenticatedMutation(http.MethodPost, "/api/v1/notifications/telegram/test", `{}`, "admin@example.com", csrf, adminCookie)
+	testTgResp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(testTgResp, testTgReq)
+	if testTgResp.Code != http.StatusOK {
+		t.Fatalf("telegram test failed: status=%d body=%s", testTgResp.Code, testTgResp.Body.String())
+	}
+	if notifications.sent != initialSent+1 {
+		t.Fatalf("expected telegram notification to be sent, sent=%d", notifications.sent)
+	}
+
+	// Test Discord mutation
+	testDcReq := authenticatedMutation(http.MethodPost, "/api/v1/notifications/discord/test", `{}`, "admin@example.com", csrf, adminCookie)
+	testDcResp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(testDcResp, testDcReq)
+	if testDcResp.Code != http.StatusOK {
+		t.Fatalf("discord test failed: status=%d body=%s", testDcResp.Code, testDcResp.Body.String())
+	}
+	if notifications.sent != initialSent+2 {
+		t.Fatalf("expected discord notification to be sent, sent=%d", notifications.sent)
+	}
+
+	// Viewer redaction check
+	_, viewerCookie, _ := startTestBrowserSession(t, server, "viewer@example.com")
+	viewerTgReq := authenticatedRead("/api/v1/notifications/telegram", "viewer@example.com", viewerCookie)
+	viewerTgResp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(viewerTgResp, viewerTgReq)
+	var viewerTgStatus map[string]any
+	if err := json.Unmarshal(viewerTgResp.Body.Bytes(), &viewerTgStatus); err != nil {
+		t.Fatal(err)
+	}
+	if _, exposed := viewerTgStatus["chatId"]; exposed {
+		t.Fatalf("viewer telegram chatId leaked: %+v", viewerTgStatus)
+	}
+
+	viewerDcReq := authenticatedRead("/api/v1/notifications/discord", "viewer@example.com", viewerCookie)
+	viewerDcResp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(viewerDcResp, viewerDcReq)
+	var viewerDcStatus map[string]any
+	if err := json.Unmarshal(viewerDcResp.Body.Bytes(), &viewerDcStatus); err != nil {
+		t.Fatal(err)
+	}
+	if _, exposed := viewerDcStatus["url"]; exposed {
+		t.Fatalf("viewer discord url leaked: %+v", viewerDcStatus)
+	}
+}
+
 func TestOperationalExtensionsAPI(t *testing.T) {
 	server, database, _ := newExtensionTestServer(t)
 	ctx := context.Background()
@@ -428,6 +511,9 @@ func newExtensionTestServer(t *testing.T) (*Server, *store.Store, *memoryNotific
 		Services: serviceManager, Terminal: terminalManager, Static: static, Audit: database,
 		History: database, HistoryQuota: func() history.QuotaState { return history.QuotaState{LimitBytes: history.DefaultSoftQuota} },
 		Alerts: database, Notifications: notifications, NTFYURL: "https://ntfy.example.com", NTFYTopic: "homelab", NTFYTokenSet: true,
+		TelegramNotifications: notifications, DiscordNotifications: notifications,
+		TelegramChatID: "123456789", TelegramBotTokenSet: true,
+		DiscordWebhookURL: "https://discord.example.com/webhook",
 		Nodes: nodeService, NodeRegistry: nodeRegistry,
 		DashboardConfig: configService,
 		Preferences:     database,

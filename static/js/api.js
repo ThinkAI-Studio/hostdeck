@@ -274,6 +274,22 @@ export class DashboardApi {
     return this.request("/api/v1/notifications/webhook/test", { method: "POST", mutation: true, body: {} });
   }
 
+  telegramStatus(signal) {
+    return this.request("/api/v1/notifications/telegram", { signal });
+  }
+
+  testTelegram() {
+    return this.request("/api/v1/notifications/telegram/test", { method: "POST", mutation: true, body: {} });
+  }
+
+  discordStatus(signal) {
+    return this.request("/api/v1/notifications/discord", { signal });
+  }
+
+  testDiscord() {
+    return this.request("/api/v1/notifications/discord/test", { method: "POST", mutation: true, body: {} });
+  }
+
   exportDashboardConfig(signal) {
     return this.request("/api/v1/config/export", { signal });
   }

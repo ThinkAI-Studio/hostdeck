@@ -432,6 +432,71 @@ func (s *Server) testNTFY(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "delivered"})
 }
 
+func (s *Server) getTelegramStatus(c *gin.Context) {
+	status := gin.H{
+		"configured":      s.options.TelegramNotifications != nil,
+		"tokenConfigured": s.options.TelegramBotTokenSet,
+	}
+	if principalFromContext(c).Role == auth.RoleAdmin {
+		status["chatId"] = strings.TrimSpace(s.options.TelegramChatID)
+	}
+	c.JSON(http.StatusOK, status)
+}
+
+func (s *Server) testTelegram(c *gin.Context) {
+	principal, ok := s.authorizeMutation(c, true)
+	if !ok {
+		return
+	}
+	if s.options.TelegramNotifications == nil {
+		writeError(c, http.StatusConflict, "telegram_not_configured", "Telegram notifications are not configured.", nil)
+		return
+	}
+	err := s.options.TelegramNotifications.Send(c.Request.Context(), alerts.Delivery{
+		Kind: alerts.DeliveryFiring, Severity: alerts.SeverityInfo,
+		Title: "Homelab dashboard test", Message: "Telegram notifications are configured correctly.",
+	})
+	if err != nil {
+		writeError(c, http.StatusBadGateway, "telegram_test_failed", "The telegram test notification could not be delivered.", nil)
+		s.audit(c, principal, "notification.telegram.test", "", "failed")
+		return
+	}
+	s.audit(c, principal, "notification.telegram.test", "", "success")
+	c.JSON(http.StatusOK, gin.H{"status": "delivered"})
+}
+
+func (s *Server) getDiscordStatus(c *gin.Context) {
+	status := gin.H{
+		"configured": s.options.DiscordNotifications != nil && s.options.DiscordWebhookURL != "",
+	}
+	if principalFromContext(c).Role == auth.RoleAdmin {
+		status["url"] = strings.TrimSpace(s.options.DiscordWebhookURL)
+	}
+	c.JSON(http.StatusOK, status)
+}
+
+func (s *Server) testDiscord(c *gin.Context) {
+	principal, ok := s.authorizeMutation(c, true)
+	if !ok {
+		return
+	}
+	if s.options.DiscordNotifications == nil || s.options.DiscordWebhookURL == "" {
+		writeError(c, http.StatusConflict, "discord_not_configured", "Discord notifications are not configured.", nil)
+		return
+	}
+	err := s.options.DiscordNotifications.Send(c.Request.Context(), alerts.Delivery{
+		Kind: alerts.DeliveryFiring, Severity: alerts.SeverityInfo,
+		Title: "Homelab dashboard test", Message: "Discord notifications are configured correctly.",
+	})
+	if err != nil {
+		writeError(c, http.StatusBadGateway, "discord_test_failed", "The discord test notification could not be delivered.", nil)
+		s.audit(c, principal, "notification.discord.test", "", "failed")
+		return
+	}
+	s.audit(c, principal, "notification.discord.test", "", "success")
+	c.JSON(http.StatusOK, gin.H{"status": "delivered"})
+}
+
 func (s *Server) writeAlertRuleError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, alerts.ErrInvalidRule):

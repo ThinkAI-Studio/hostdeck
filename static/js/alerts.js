@@ -77,6 +77,10 @@ export function createAlertsController({ api, demo = false, toast }) {
   const ntfyTest = document.getElementById("ntfy-test");
   const webhookStatus = document.getElementById("webhook-status");
   const webhookTest = document.getElementById("webhook-test");
+  const telegramStatus = document.getElementById("telegram-status");
+  const telegramTest = document.getElementById("telegram-test");
+  const discordStatus = document.getElementById("discord-status");
+  const discordTest = document.getElementById("discord-test");
   const ruleDialog = document.getElementById("alert-rule-dialog");
   const ruleForm = document.getElementById("alert-rule-form");
   const ruleTitle = document.getElementById("alert-rule-dialog-title");
@@ -375,9 +379,27 @@ export function createAlertsController({ api, demo = false, toast }) {
     const demoStates = [];
     const demoEvents = [{ id: 1, ruleId: "rule_disk", nodeId: "local", resourceType: "system", resourceId: "root", type: "resolved", severity: "critical", message: "Root disk recovered below threshold", occurredAt: new Date(Date.now() - 3600_000).toISOString() }];
     const requests = demo || typeof api.listAlertRules !== "function"
-      ? [Promise.resolve(demoRules), Promise.resolve(demoStates), Promise.resolve(demoEvents), Promise.resolve([]), Promise.resolve({ configured: true, url: "https://ntfy.sh", topic: "homelab-demo", tokenConfigured: true }), Promise.resolve({ configured: true, url: "https://hooks.example.invalid/homelab", secretConfigured: true })]
-      : [api.listAlertRules(), api.listAlerts({ node, active: true }), api.listAlertEvents({ node }), api.listMaintenanceWindows(), api.ntfyStatus(), api.webhookStatus()];
-    const [ruleResult, stateResult, eventResult, windowResult, ntfyResult, webhookResult] = await Promise.allSettled(requests);
+      ? [
+          Promise.resolve(demoRules),
+          Promise.resolve(demoStates),
+          Promise.resolve(demoEvents),
+          Promise.resolve([]),
+          Promise.resolve({ configured: true, url: "https://ntfy.sh", topic: "homelab-demo", tokenConfigured: true }),
+          Promise.resolve({ configured: true, url: "https://hooks.example.invalid/homelab", secretConfigured: true }),
+          Promise.resolve({ configured: true, chatId: "123456789", tokenConfigured: true }),
+          Promise.resolve({ configured: true, url: "https://discord.com/api/webhooks/demo" })
+        ]
+      : [
+          api.listAlertRules(),
+          api.listAlerts({ node, active: true }),
+          api.listAlertEvents({ node }),
+          api.listMaintenanceWindows(),
+          api.ntfyStatus(),
+          api.webhookStatus(),
+          api.telegramStatus(),
+          api.discordStatus()
+        ];
+    const [ruleResult, stateResult, eventResult, windowResult, ntfyResult, webhookResult, telegramResult, discordResult] = await Promise.allSettled(requests);
     if (ruleResult.status === "fulfilled") rules = Array.isArray(ruleResult.value) ? ruleResult.value : [];
     if (stateResult.status === "fulfilled") states = Array.isArray(stateResult.value) ? stateResult.value : [];
     if (eventResult.status === "fulfilled") events = Array.isArray(eventResult.value) ? eventResult.value : [];
@@ -405,6 +427,34 @@ export function createAlertsController({ api, demo = false, toast }) {
       webhookStatus.dataset.configured = "false";
       webhookStatus.textContent = "WEBHOOK STATUS UNAVAILABLE";
       webhookTest.disabled = true;
+    }
+    if (telegramStatus && telegramTest) {
+      if (telegramResult.status === "fulfilled") {
+        const value = telegramResult.value || {};
+        telegramStatus.dataset.configured = String(Boolean(value.configured));
+        telegramStatus.textContent = value.configured
+          ? `CONFIGURED · CHAT ${value.chatId || "ID"} · BOT TOKEN ${value.tokenConfigured ? "LOADED" : "NOT SET"}`
+          : "NOT CONFIGURED · SET TELEGRAM_BOT_TOKEN_FILE AND TELEGRAM_CHAT_ID";
+        telegramTest.disabled = !admin || !value.configured;
+      } else {
+        telegramStatus.dataset.configured = "false";
+        telegramStatus.textContent = "TELEGRAM STATUS UNAVAILABLE";
+        telegramTest.disabled = true;
+      }
+    }
+    if (discordStatus && discordTest) {
+      if (discordResult.status === "fulfilled") {
+        const value = discordResult.value || {};
+        discordStatus.dataset.configured = String(Boolean(value.configured));
+        discordStatus.textContent = value.configured
+          ? `CONFIGURED · ${value.url || "webhook endpoint"}`
+          : "NOT CONFIGURED · SET DISCORD_WEBHOOK_URL";
+        discordTest.disabled = !admin || !value.configured;
+      } else {
+        discordStatus.dataset.configured = "false";
+        discordStatus.textContent = "DISCORD STATUS UNAVAILABLE";
+        discordTest.disabled = true;
+      }
     }
     const failures = [ruleResult, stateResult, eventResult, windowResult].filter((result) => result.status === "rejected");
     setDialogStatus(failures.length ? `${failures.length} monitoring source${failures.length === 1 ? " is" : "s are"} unavailable; available data is shown.` : `Monitoring state refreshed for ${node || "all nodes"}.`, failures.length ? "error" : "info");
@@ -508,11 +558,44 @@ export function createAlertsController({ api, demo = false, toast }) {
       webhookTest.disabled = !admin || webhookStatus.dataset.configured !== "true";
     }
   });
+  if (telegramTest) {
+    telegramTest.addEventListener("click", async () => {
+      telegramTest.disabled = true;
+      try {
+        if (!demo) await api.testTelegram();
+        toast("Telegram test push delivered.");
+      } catch (error) {
+        toast(error?.message || "Telegram test push failed.", "error");
+      } finally {
+        telegramTest.disabled = !admin || telegramStatus?.dataset.configured !== "true";
+      }
+    });
+  }
+  if (discordTest) {
+    discordTest.addEventListener("click", async () => {
+      discordTest.disabled = true;
+      try {
+        if (!demo) await api.testDiscord();
+        toast("Discord test push delivered.");
+      } catch (error) {
+        toast(error?.message || "Discord test push failed.", "error");
+      } finally {
+        discordTest.disabled = !admin || discordStatus?.dataset.configured !== "true";
+      }
+    });
+  }
 
   return {
     open,
     refresh,
-    setAdmin(value) { admin = Boolean(value); ntfyTest.disabled = !admin || ntfyStatus.dataset.configured !== "true"; webhookTest.disabled = !admin || webhookStatus.dataset.configured !== "true"; if (dialog.open) { renderRules(); renderStates(); renderWindows(); } },
+    setAdmin(value) {
+      admin = Boolean(value);
+      if (ntfyTest) ntfyTest.disabled = !admin || ntfyStatus?.dataset.configured !== "true";
+      if (webhookTest) webhookTest.disabled = !admin || webhookStatus?.dataset.configured !== "true";
+      if (telegramTest) telegramTest.disabled = !admin || telegramStatus?.dataset.configured !== "true";
+      if (discordTest) discordTest.disabled = !admin || discordStatus?.dataset.configured !== "true";
+      if (dialog.open) { renderRules(); renderStates(); renderWindows(); }
+    },
     setNode(value) { node = value === "local" ? "local" : value || ""; if (dialog.open) refresh(); },
   };
 }
