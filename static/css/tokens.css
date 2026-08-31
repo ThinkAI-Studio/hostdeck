@@ -19,7 +19,7 @@
   --bg-surface: #0e1418;     /* elevated chassis / panels */
   --bg-card: #12191f;        /* widget cards & telemetry cells */
   --bg-card-hover: #18222a;  /* card hover */
-  --bg-overlay: rgba(8, 12, 16, 0.88);
+  --bg-overlay: #0e1418;     /* solid modal & dialog overlay surface */
   --bg-recess: #070b0e;      /* inset inputs, code blocks */
   --surface-muted: #0d151a;
   --surface-selected: rgba(229, 67, 44, 0.08);
@@ -112,7 +112,7 @@
   --bg-surface: #f5f2ec;      /* elevated chassis / panels */
   --bg-card: #fffdf8;         /* widget cards & telemetry cells */
   --bg-card-hover: #f0ebe3;   /* card hover */
-  --bg-overlay: rgba(5, 7, 10, 0.06);
+  --bg-overlay: #ffffff;      /* solid crisp white modal & dialog surface */
   --bg-recess: #e8e4dc;       /* inset inputs, code blocks */
   --surface-muted: #efeae2;
   --surface-selected: rgba(229, 67, 44, 0.08);

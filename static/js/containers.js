@@ -27,7 +27,7 @@ function normalizedContainer(container = {}, index = 0) {
     ports: Array.isArray(container.ports) ? container.ports.map(String) : [],
     restartCount,
     protected: Boolean(container.protected),
-    actions: container.actions || {},
+    actions: container.actions || { logs: true, exec: true, restart: true, stop: true },
   };
 }
 
@@ -115,30 +115,30 @@ export function createContainersController({ terminal, api, toast, onLifecycle }
     actions.className = "container-actions";
     const inspect = document.createElement("button");
     inspect.type = "button";
-    inspect.className = "container-action";
+    inspect.className = "container-action container-action-inspect";
     inspect.textContent = "INSPECT";
     inspect.addEventListener("click", () => openInspect(inspect, article.container));
     const logs = document.createElement("button");
     logs.type = "button";
-    logs.className = "container-action";
+    logs.className = "container-action container-action-logs";
     logs.textContent = "LIVE LOGS";
     logs.addEventListener("click", () => openTerminal(logs, article.container, "logs"));
     const exec = document.createElement("button");
     exec.type = "button";
-    exec.className = "container-action";
+    exec.className = "container-action container-action-exec";
     exec.textContent = "SHELL";
     exec.addEventListener("click", () => openTerminal(exec, article.container, "exec"));
     const restart = document.createElement("button");
     restart.type = "button";
-    restart.className = "container-action";
+    restart.className = "container-action container-action-restart";
     restart.textContent = "RESTART";
     restart.addEventListener("click", () => runLifecycle(restart, article.container, "restart"));
     const stop = document.createElement("button");
     stop.type = "button";
-    stop.className = "container-action container-action-danger";
+    stop.className = "container-action container-action-stop container-action-danger";
     stop.textContent = "STOP";
     stop.addEventListener("click", () => runLifecycle(stop, article.container, "stop"));
-    actions.append(inspect, logs, exec, restart, stop);
+    actions.append(logs, exec, restart, stop, inspect);
 
     article.append(heading, subtitle, telemetry, actions);
     article.refs = { name, state, stateLabel, subtitle, telemetry, metrics, cpu, memory, ports, inspect, logs, exec, restart, stop };
@@ -199,12 +199,13 @@ export function createContainersController({ terminal, api, toast, onLifecycle }
     exec.title = !admin ? "Admin role required" : container.protected ? "Protected container" : !running ? "Container is not running" : "Open container shell";
     exec.setAttribute("aria-label", `Open shell in ${container.name}`);
     const lifecycleAvailable = typeof api?.restartContainer === "function" && typeof api?.stopContainer === "function";
-    const lifecycleReason = !lifecycleAvailable ? "Dashboard version does not support lifecycle actions" : !admin ? "Admin role required" : container.protected ? "Protected container" : !running ? "Container is not running" : "";
-    restart.disabled = Boolean(lifecycleReason) || container.actions.restart !== true || !container.id;
-    stop.disabled = Boolean(lifecycleReason) || container.actions.stop !== true || !container.id;
-    restart.title = lifecycleReason || "Restart this container";
-    stop.title = lifecycleReason || "Stop this container";
-    restart.setAttribute("aria-label", `Restart ${container.name}`);
+    const restartReason = !lifecycleAvailable ? "Dashboard version does not support lifecycle actions" : !admin ? "Admin role required" : container.protected ? "Protected container" : "";
+    const stopReason = !lifecycleAvailable ? "Dashboard version does not support lifecycle actions" : !admin ? "Admin role required" : container.protected ? "Protected container" : !running ? "Container is not running" : "";
+    restart.disabled = Boolean(restartReason) || container.actions.restart !== true || !container.id;
+    stop.disabled = Boolean(stopReason) || container.actions.stop !== true || !container.id;
+    restart.title = restartReason || (running ? "Restart this container" : "Start this container");
+    stop.title = stopReason || (running ? "Stop this container" : "Container is already stopped");
+    restart.setAttribute("aria-label", `${running ? "Restart" : "Start"} ${container.name}`);
     stop.setAttribute("aria-label", `Stop ${container.name}`);
   }
 
@@ -291,6 +292,35 @@ export function createContainersController({ terminal, api, toast, onLifecycle }
     } catch (error) {
       toast(error?.message || `Unable to open ${mode}.`, "error");
     } finally {
+      const item = control.closest(".container-item");
+      if (item?.container) updateItem(item, item.container);
+    }
+  }
+
+  async function runLifecycle(control, container, action) {
+    if (!control || !container || !container.id) return;
+    if (action === "stop" && !window.confirm(`Are you sure you want to stop container "${container.name}"?`)) {
+      return;
+    }
+    control.disabled = true;
+    const originalText = control.textContent;
+    control.textContent = action === "restart" ? "RESTARTING…" : "STOPPING…";
+    try {
+      if (action === "restart") {
+        await api.restartContainer(container.id, nodeId);
+        toast(`Container "${container.name}" restart initiated.`, "info");
+      } else if (action === "stop") {
+        await api.stopContainer(container.id, nodeId);
+        toast(`Container "${container.name}" stopped.`, "info");
+      }
+      if (typeof onLifecycle === "function") {
+        await onLifecycle(action, container);
+      }
+    } catch (error) {
+      toast(error?.message || `Unable to ${action} container "${container.name}".`, "error");
+    } finally {
+      control.disabled = false;
+      control.textContent = originalText;
       const item = control.closest(".container-item");
       if (item?.container) updateItem(item, item.container);
     }
