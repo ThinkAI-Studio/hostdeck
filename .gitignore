@@ -9,4 +9,10 @@ bin/
 .claude/
 .hallmark/
 .omc/
+.hermes/
+assets/
 secrets/
+# Only operational docs under Docs/ are version-controlled.
+Docs/*
+!Docs/operations/
+.omp/
